@@ -1,5 +1,5 @@
-import json
 import os
+import json
 import joblib
 import numpy as np
 import psycopg2
@@ -8,16 +8,26 @@ from dotenv import load_dotenv
 
 load_dotenv()
 
-# بارگذاری مدل ۶ خوشه‌ای
-model_path = "models/online_cluster_classifier.joblib"
-model = None
+MODEL_PATH = "models/online_cluster_classifier.joblib"
+_model = None
 
-if os.path.exists(model_path):
-    try:
-        model = joblib.load(model_path)
-        print("Clustering online model loaded successfully.")
-    except Exception as e:
-        print(f"Warning: Could not load model: {e}")
+def load_clustering_model(path: str = MODEL_PATH):
+    global _model
+    if _model is not None:
+        return _model
+    if os.path.exists(path):
+        try:
+            _model = joblib.load(path)
+            print("Clustering online model loaded successfully.")
+        except Exception as e:
+            print(f"Warning: Could not load model: {e}")
+            _model = None
+    else:
+        _model = None
+    return _model
+
+# بارگذاری اولیه مدل
+load_clustering_model()
 
 def get_db_connection():
     db_url = os.getenv("DATABASE_URL")
@@ -31,36 +41,35 @@ def get_db_connection():
         port=os.getenv("DB_PORT", 5432)
     )
 
-consumer = KafkaConsumer(
-    'raw_products',
-    bootstrap_servers=['localhost:9092'],
-    auto_offset_reset='latest',
-    enable_auto_commit=True,
-    value_deserializer=lambda x: json.loads(x.decode('utf-8'))
-)
+def safe_float(value, default: float = 0.0) -> float:
+    """Safely convert value to float, handling None and malformed strings."""
+    if value is None:
+        return default
+    try:
+        val = float(value)
+        if np.isnan(val) or np.isinf(val):
+            return default
+        return val
+    except (ValueError, TypeError):
+        return default
 
-def predict_cluster(data):
-    # اولویت ۱: اگر شناسه کلاستر در پیام آماده بود
-    if 'cluster' in data and data['cluster'] is not None:
-        try:
-            return int(data['cluster'])
-        except Exception:
-            pass
+def extract_features(data: dict) -> tuple[float, float, float]:
+    """Extract price, rate, rate_cnt with fallback keys and safe float parsing."""
+    if not isinstance(data, dict):
+        return 0.0, 0.0, 0.0
 
-    price = float(data.get('Price') or data.get('price') or 0.0)
-    rate = float(data.get('Rate') or data.get('rate') or 0.0)
-    rate_cnt = float(data.get('Rate_cnt') or data.get('rate_cnt') or 0.0)
+    raw_price = data.get("price") if data.get("price") is not None else data.get("Price")
+    raw_rate = data.get("rate") if data.get("rate") is not None else data.get("Rate")
+    raw_rate_cnt = data.get("rate_cnt") if data.get("rate_cnt") is not None else data.get("Rate_cnt")
 
-    # اولویت ۲: پیش‌بینی با مدل آموزش‌دیده ۶ خوشه‌ای
-    if model is not None:
-        try:
-            X = np.array([[price, rate, rate_cnt]])
-            pred = model.predict(X)[0]
-            return int(pred)
-        except Exception as e:
-            pass
+    price = safe_float(raw_price, 0.0)
+    rate = safe_float(raw_rate, 0.0)
+    rate_cnt = safe_float(raw_rate_cnt, 0.0)
 
-    # فال‌بک منطقی بر اساس تفکیک Active و دهک‌های قیمتی پروفایل
+    return price, rate, rate_cnt
+
+def fallback_cluster_rule(price: float, rate: float, rate_cnt: float) -> int:
+    """Baseline fallback heuristic based on active status and price percentiles."""
     if rate_cnt > 0 or rate > 0:
         return 0
     if price < 900000:
@@ -72,21 +81,74 @@ def predict_cluster(data):
     else:
         return 5
 
-def save_to_db(data):
-    product_id = str(data.get('id', data.get('product_id', '')))
-    cluster_label = predict_cluster(data)
+def predict_cluster(data: dict, model_instance=None) -> int:
+    """
+    Predict product cluster using:
+    1. Pre-assigned cluster in payload (Priority 1)
+    2. Online ML model prediction (Priority 2)
+    3. Heuristic fallback (Priority 3)
+    """
+    if not isinstance(data, dict):
+        return fallback_cluster_rule(0.0, 0.0, 0.0)
 
+    # اولویت ۱: اگر شناسه کلاستر در پیام آماده بود
+    if 'cluster' in data and data['cluster'] is not None:
+        try:
+            return int(data['cluster'])
+        except (ValueError, TypeError):
+            pass
+
+    price, rate, rate_cnt = extract_features(data)
+
+    clf = model_instance if model_instance is not None else _model
+    if clf is None:
+        clf = load_clustering_model()
+
+    # اولویت ۲: پیش‌بینی با مدل آموزش‌دیده
+    if clf is not None:
+        try:
+            X = np.array([[price, rate, rate_cnt]])
+            pred = clf.predict(X)[0]
+            return int(pred)
+        except Exception as e:
+            print(f"Inference error in clustering model: {e}")
+
+    # اولویت ۳: فال‌بک منطقی بر اساس تفکیک Active و دهک‌های قیمتی
+    return fallback_cluster_rule(price, rate, rate_cnt)
+
+def save_to_db(product_id: str, cluster_label: int):
     conn = get_db_connection()
     cur = conn.cursor()
-    cur.execute(
-        "INSERT INTO kafka_clustering_results (product_id, cluster_label) VALUES (%s, %s)",
-        (product_id, cluster_label)
-    )
-    conn.commit()
-    cur.close()
-    conn.close()
+    try:
+        cur.execute(
+            "INSERT INTO kafka_clustering_results (product_id, cluster_label) VALUES (%s, %s)",
+            (product_id, cluster_label)
+        )
+        conn.commit()
+    finally:
+        cur.close()
+        conn.close()
 
-print("Clustering Consumer started and waiting for messages...")
-for message in consumer:
-    save_to_db(message.value)
-    print(f"Processed cluster for product: {message.value.get('id', message.value.get('product_id'))} -> Cluster {predict_cluster(message.value)}")
+def run_consumer():
+    consumer = KafkaConsumer(
+        'raw_products',
+        bootstrap_servers=['localhost:9092'],
+        auto_offset_reset='latest',
+        enable_auto_commit=False,
+        value_deserializer=lambda x: json.loads(x.decode('utf-8'))
+    )
+
+    print("Clustering Consumer started and waiting for messages...")
+    for message in consumer:
+        try:
+            data = message.value
+            product_id = str(data.get('id') or data.get('product_id') or '')
+            cluster_label = predict_cluster(data)
+            save_to_db(product_id, cluster_label)
+            consumer.commit()
+            print(f"Processed cluster for product: {product_id} -> Cluster {cluster_label}")
+        except Exception as exc:
+            print(f"Error handling Kafka product message: {exc}")
+
+if __name__ == "__main__":
+    run_consumer()

@@ -78,3 +78,15 @@ def search_exact(product_name: str):
         )
         products = result.fetchall()
         return [{"title": p[0], "price": f"{p[1]:,.0f} تومان"} for p in products]
+
+from src.recommendation.recommender import ContentRecommender
+
+_recommender_instance = ContentRecommender()
+
+@tool
+def recommend_similar_products(product_title: str):
+    """Recommend similar products based on a given product title or name."""
+    recs = _recommender_instance.get_similar_products_by_title(product_title, limit=5)
+    if not recs:
+        return "هیچ کالای مشابهی یافت نشد."
+    return [{"title": r["title"], "price": r["price"]} for r in recs]
