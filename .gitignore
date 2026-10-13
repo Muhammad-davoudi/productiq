@@ -1,0 +1,56 @@
+# Environment & Secrets
+.env
+.env.*
+!.env.example
+
+# Python & Virtual Environments
+__pycache__/
+*.py[cod]
+*$py.class
+*.so
+.Python
+.venv/
+env/
+venv/
+ENV/
+build/
+dist/
+*.egg-info/
+
+# Heavy datasets and local model artifacts
+data/
+models/
+mlruns/
+kafka_*.tgz
+*.npy
+*.pkl
+*.joblib
+*.zip
+*.bin
+*.vec
+*.csv
+
+# Archives & Temporary files
+_archive_phase0/
+.legacy_backup/
+*.log
+*.bak
+*.backup
+*.broken-*
+*.failed-*
+
+# Node & Frontend
+node_modules/
+frontend/node_modules/
+frontend/dist/
+.npm
+.eslintcache
+
+# Media & OS
+*.png
+*.jpg
+*.jpeg
+.vscode/
+.idea/
+.DS_Store
+Thumbs.db

@@ -1,0 +1,15 @@
+llm:
+  provider_env_var: "PROVIDER"
+  default_provider: "openai"
+  default_model: "gpt-4o-mini"
+  temperature: 0.0
+  request_timeout: 15.0
+  max_retries: 2
+
+intent:
+  confidence_threshold: 0.6
+  max_price_budget_ratio: 2.0
+
+grounding:
+  max_recommendations_context: 5
+  strict_facts_only: true
