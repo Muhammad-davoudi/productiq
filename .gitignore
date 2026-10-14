@@ -54,3 +54,23 @@ frontend/dist/
 .idea/
 .DS_Store
 Thumbs.db
+
+# --- Phase 0.7: Added by Digikala AI Cleanup Plan ---
+# Kafka archive & logs
+kafka_2.13-3.7.0.tgz
+logs/
+kafka-logs/
+zookeeper-data/
+
+# Python & Virtualenv
+__pycache__/
+*.py[cod]
+.venv/
+env/
+
+# MLflow, Large Models & Embeddings
+mlruns/
+models/*.bin
+models/*.vec
+*.npy
+*.zip
