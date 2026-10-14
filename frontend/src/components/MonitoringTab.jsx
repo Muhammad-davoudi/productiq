@@ -1,88 +1,78 @@
 import React, { useState, useEffect } from 'react';
 import SafePlot from './Plot';
 import KPICard from './KPICard';
-import clusteringEval from '../data/clustering_evaluation.json';
 
-export default function MonitoringTab({ defaultPlotLayout, nlpEval, clusters, toPersianNum }) {
-  const [stats, setStats] = useState({
-    version: 'Active-Model',
-    cpu: 18,
-    ram: 32,
-    runs: [
-      { version: 'NLP-LinearSVC', accuracy: 0.708, f1_score: 0.709 },
-      { version: 'KMeans-k5', accuracy: 0.0, f1_score: 0.635 },
-      { version: 'Hybrid-Recommender', accuracy: 0.0, f1_score: 0.0 }
-    ]
-  });
+export default function MonitoringTab({ defaultPlotLayout, nlpEval: initialNlpEval, clusters, toPersianNum }) {
+  const [monitoringData, setMonitoringData] = useState(null);
   const [loading, setLoading] = useState(true);
-  const [source, setSource] = useState('پیش‌فرض');
-
-  const getApiUrl = (endpoint) => {
-    const isViteDev = window.location.port === '5173';
-    const base = isViteDev ? 'http://127.0.0.1:8000' : '';
-    return `${base}${endpoint}`;
-  };
+  const [error, setError] = useState(null);
 
   useEffect(() => {
-    let cancelled = false;
-
-    const load = async () => {
+    let isMounted = true;
+    const fetchMonitoringData = async () => {
       try {
-        const res = await fetch(getApiUrl('/api/monitoring/stats'));
-        if (!res.ok) throw new Error('bad status');
-        const data = await res.json();
-        const list = Array.isArray(data) ? data : [data];
-        const item = list[0] || {};
-        if (cancelled) return;
-
-        // فقط اگر داده معنادار آمد جایگزین کن
-        const hasReal =
-          list.length > 0 &&
-          (Number(item.cpu) > 0 || Number(item.ram) > 0 || item.version);
-
-        if (hasReal) {
-          setStats({
-            version: item.version || item.model_version || 'Active-Model',
-            cpu: Number(item.cpu) || 18,
-            ram: Number(item.ram) || 32,
-            runs: list.map(r => ({
-              version: r.version || r.model_version || 'Run',
-              accuracy: Number(r.accuracy) || 0,
-              f1_score: Number(r.f1_score) || 0
-            }))
-          });
-          setSource('API / MLflow');
-        } else {
-          setSource('پیش‌فرض محلی');
+        const res = await fetch('/api/monitoring/stats');
+        if (!res.ok) {
+          throw new Error(`HTTP error! status: ${res.status}`);
         }
-      } catch {
-        if (!cancelled) setSource('پیش‌فرض محلی (API در دسترس نیست)');
-      } finally {
-        if (!cancelled) setLoading(false);
+        const data = await res.json();
+        if (isMounted) {
+          setMonitoringData(data);
+          setLoading(false);
+        }
+      } catch (err) {
+        if (isMounted) {
+          console.error("Failed to fetch monitoring data:", err);
+          setError(err.message);
+          setLoading(false);
+        }
       }
     };
 
-    load();
-    return () => { cancelled = true; };
+    fetchMonitoringData();
+    const interval = setInterval(fetchMonitoringData, 15000); // به روز رسانی خودکار هر ۱۵ ثانیه
+
+    return () => {
+      isMounted = false;
+      clearInterval(interval);
+    };
   }, []);
 
-  // ——— NLP ———
-  const f1 = nlpEval?.f1_per_class || { Negative: 0.6923, Neutral: 0.6258, Positive: 0.8075 };
-  const acc = nlpEval?.accuracy ?? 0.7083;
-  const macroF1 = nlpEval?.macro_f1 ?? 0.7085;
-  const modelName = nlpEval?.model || 'TF-IDF + LinearSVC';
-  const dataset = nlpEval?.dataset || 'labeling_sample_1200';
+  const fmt = typeof toPersianNum === 'function'
+    ? toPersianNum
+    : (n) => Number(n || 0).toLocaleString('fa-IR');
 
-  // ——— Clustering ———
+  // داده‌های NLP (ترجیح با دیتای زنده‌ی بک‌اند، سپس prop پاس‌داده‌شده)
+  const nlp = monitoringData?.nlp || initialNlpEval || {};
+  const f1 = nlp?.f1_per_class || { Negative: 0, Neutral: 0, Positive: 0 };
+  const acc = Number(nlp?.accuracy) || 0;
+  const macroF1 = Number(nlp?.macro_f1) || 0;
+  const modelName = nlp?.model || 'TF-IDF + LinearSVC';
+  const dataset = nlp?.dataset || 'labeling_sample_1200';
+
+  // داده‌های خوشه‌بندی
+  const clusteringEval = monitoringData?.clustering || {};
   const selectedK = clusteringEval?.selected_k ?? 5;
   const evalMetrics = Array.isArray(clusteringEval?.evaluation_metrics)
     ? clusteringEval.evaluation_metrics
     : [];
   const best = evalMetrics.find(m => m.k === selectedK) || evalMetrics[evalMetrics.length - 1] || {};
-  const silhouette = Number(best.silhouette_score) || 0.635;
-  const davies = Number(best.davies_bouldin_score) || 0.46;
-  const inertia = Number(best.inertia) || 35174;
+  const silhouette = Number(best.silhouette_score) || 0;
+  const davies = Number(best.davies_bouldin_score) || 0;
+  const inertia = Number(best.inertia) || 0;
   const featuresUsed = clusteringEval?.features_used || [];
+
+  // سیستم توصیه‌گر
+  const recommender = monitoringData?.recommender || {};
+  const recLayers = recommender?.scoring_layers || [
+    { name: 'شباهت معنایی', weight: 0.92 },
+    { name: 'خوشه کالا', weight: 0.85 },
+    { name: 'تعامل کاربر', weight: 0.78 },
+    { name: 'فیلتر دسته', weight: 0.70 }
+  ];
+
+  // منابع سرور
+  const sys = monitoringData?.system || { cpu_percent: 0, ram_percent: 0, ram_used_gb: 0, ram_total_gb: 8 };
 
   const clusterList = Array.isArray(clusters) ? clusters : [];
   const activeCount = clusterList
@@ -92,11 +82,7 @@ export default function MonitoringTab({ defaultPlotLayout, nlpEval, clusters, to
     .filter(c => c.group === 'Inactive')
     .reduce((s, c) => s + (Number(c.total_products) || 0), 0);
   const totalClusterProducts = activeCount + inactiveCount || 1;
-  const fmt = typeof toPersianNum === 'function'
-    ? toPersianNum
-    : (n) => Number(n || 0).toLocaleString('fa-IR');
 
-  // فونت‌های بزرگ‌تر مخصوص این تب
   const plotFont = {
     ...defaultPlotLayout,
     font: {
@@ -125,102 +111,32 @@ export default function MonitoringTab({ defaultPlotLayout, nlpEval, clusters, to
     }
   };
 
-  if (loading) {
-    return (
-      <div className="flex items-center justify-center py-24 text-slate-300 text-base">
-        <span className="w-2.5 h-2.5 rounded-full bg-cyan-400 animate-ping ml-2.5"></span>
-        در حال دریافت مشخصات سیستم و MLflow...
-      </div>
-    );
-  }
-
   return (
     <div className="space-y-10">
-      {/* ========== سخت‌افزار + MLflow ========== */}
-      <section>
-        <div className="flex flex-wrap items-center justify-between gap-2 mb-3">
-          <h2 className="text-lg font-bold text-white">وضعیت سخت‌افزار و نسخه‌های ثبت‌شده در MLflow</h2>
-          <span className="text-xs px-2.5 py-1 rounded-lg bg-slate-800 text-slate-400 border border-slate-700">
-            منبع: {source}
-          </span>
-        </div>
-
-        <div className="grid grid-cols-1 lg:grid-cols-3 gap-4">
-          <div className="space-y-4">
-            <KPICard title="آخرین نسخه / Run" value={stats.version} subtitle="نسخه عملیاتی یا mlflow.runName" badge="MLflow" />
-            <KPICard
-              title="بار پردازشی"
-              value={`CPU ${stats.cpu}٪`}
-              subtitle={`RAM: ${stats.ram}٪`}
-              badge="سیستم"
-              highlight={stats.cpu > 80 || stats.ram > 80}
-            />
+      {/* ========== وضعیت زیرساخت و منابع سرور ========== */}
+      <section className="bg-slate-900/60 border border-slate-800 rounded-2xl p-5">
+        <div className="flex items-center justify-between mb-4">
+          <div>
+            <h2 className="text-lg font-bold text-white">مانیتورینگ منابع سرور و زیرساخت</h2>
+            <p className="text-xs text-slate-400 mt-0.5">دریافت زنده از API بک‌اند (/api/monitoring/stats)</p>
           </div>
-          <div className="lg:col-span-2 bg-[#0b1120] border border-slate-800/90 rounded-xl p-4">
-            <h3 className="text-[15px] font-semibold text-slate-100 mb-3">مصرف منابع سرور استنتاج</h3>
-            <div className="h-52">
-              <SafePlot
-                data={[{
-                  type: 'bar',
-                  x: ['پردازنده (CPU)', 'حافظه رم (RAM)'],
-                  y: [stats.cpu, stats.ram],
-                  marker: {
-                    color: [
-                      stats.cpu > 80 ? '#ef4444' : '#06b6d4',
-                      stats.ram > 80 ? '#ef4444' : '#8b5cf6'
-                    ]
-                  },
-                  text: [`${stats.cpu}٪`, `${stats.ram}٪`],
-                  textposition: 'outside',
-                  textfont: { size: 15, color: '#f1f5f9', family: 'Vazirmatn, Tahoma' }
-                }]}
-                layout={{
-                  ...plotFont,
-                  margin: { t: 35, r: 20, b: 45, l: 55 },
-                  yaxis: {
-                    ...plotFont.yaxis,
-                    range: [0, 100],
-                    title: { text: 'درصد اشغال', font: { size: 13, color: '#94a3b8' } }
-                  }
-                }}
-                style={{ width: '100%', height: '100%' }}
-                config={{ displayModeBar: false, responsive: true }}
-              />
-            </div>
+          <div className="flex items-center gap-2">
+            <span className={`inline-block w-2.5 h-2.5 rounded-full ${loading ? 'bg-amber-400 animate-pulse' : error ? 'bg-rose-500' : 'bg-emerald-400'}`}></span>
+            <span className="text-xs text-slate-300">{loading ? 'در حال همگام‌سازی...' : error ? 'خطای شبکه' : 'آنلاین و همگام'}</span>
           </div>
         </div>
-
-        <div className="mt-4 bg-[#0b1120] border border-slate-800/90 rounded-xl p-4 overflow-x-auto">
-          <h3 className="text-[15px] font-semibold text-slate-100 mb-3">Runهای ثبت‌شده</h3>
-          <table className="w-full text-right text-sm text-slate-300">
-            <thead className="bg-[#151e33] text-slate-300 border-b border-slate-700">
-              <tr>
-                <th className="py-3 px-3 font-semibold">نام Run / مدل</th>
-                <th className="py-3 px-3 font-semibold">Accuracy</th>
-                <th className="py-3 px-3 font-semibold">F1 / Silhouette</th>
-              </tr>
-            </thead>
-            <tbody className="divide-y divide-slate-800/50">
-              {(stats.runs || []).map((r, i) => (
-                <tr key={i} className="hover:bg-slate-800/30">
-                  <td className="py-3 px-3 text-cyan-300 font-medium text-[14px]">{r.version || '—'}</td>
-                  <td className="py-3 px-3 text-[14px]">
-                    {r.accuracy ? `${(Number(r.accuracy) * 100).toFixed(1)}٪` : '—'}
-                  </td>
-                  <td className="py-3 px-3 text-[14px]">
-                    {r.f1_score ? Number(r.f1_score).toFixed(3) : '—'}
-                  </td>
-                </tr>
-              ))}
-            </tbody>
-          </table>
+        <div className="grid grid-cols-2 lg:grid-cols-4 gap-4">
+          <KPICard title="مصرف پردازنده (CPU)" value={`${sys.cpu_percent}٪`} subtitle="بار پردازشی جاری" badge="System" />
+          <KPICard title="مصرف حافظه (RAM)" value={`${sys.ram_percent}٪`} subtitle={`${sys.ram_used_gb} / ${sys.ram_total_gb} GB`} badge="Memory" highlight={sys.ram_percent > 85} />
+          <KPICard title="وضعیت MLflow" value={monitoringData?.mlflow?.status || 'Active'} subtitle={`آخرین Run: ${monitoringData?.mlflow?.latest_run_id || 'N/A'}`} badge="Registry" />
+          <KPICard title="وضعیت سرویس توصیه‌گر" value={recommender.status || 'Active'} subtitle={recommender.architecture ? 'هیبریدی' : 'آنلاین'} badge="Service" highlight />
         </div>
       </section>
 
-      {/* ========== NLP ========== */}
+      {/* ========== فرآیند مدل‌سازی تحلیل احساسات ========== */}
       <section>
-        <h2 className="text-lg font-bold text-white mb-1">مدل تحلیل احساسات (NLP)</h2>
-        <p className="text-sm text-slate-400 mb-3">منبع: nlp_evaluation.json</p>
+        <h2 className="text-lg font-bold text-white mb-1">فرآیند مدل‌سازی تحلیل احساسات</h2>
+        <p className="text-sm text-slate-400 mb-3">منبع: بک‌اند و nlp_evaluation.json</p>
         <div className="grid grid-cols-1 lg:grid-cols-3 gap-4">
           <div className="space-y-4">
             <KPICard title="معماری" value={modelName} subtitle={dataset} badge="NLP" />
@@ -240,8 +156,8 @@ export default function MonitoringTab({ defaultPlotLayout, nlpEval, clusters, to
                 data={[{
                   type: 'bar',
                   x: ['منفی', 'خنثی', 'مثبت'],
-                  y: [f1.Negative, f1.Neutral, f1.Positive],
-                  text: [f1.Negative, f1.Neutral, f1.Positive].map(
+                  y: [f1.Negative || 0, f1.Neutral || 0, f1.Positive || 0],
+                  text: [f1.Negative || 0, f1.Neutral || 0, f1.Positive || 0].map(
                     v => `${(Number(v) * 100).toFixed(1)}٪`
                   ),
                   textposition: 'outside',
@@ -261,10 +177,10 @@ export default function MonitoringTab({ defaultPlotLayout, nlpEval, clusters, to
         </div>
       </section>
 
-      {/* ========== Clustering ========== */}
+      {/* ========== مدل خوشه‌بندی کالاها ========== */}
       <section>
         <h2 className="text-lg font-bold text-white mb-1">مدل خوشه‌بندی کالاها (K-Means)</h2>
-        <p className="text-sm text-slate-400 mb-3">منبع: clustering_evaluation.json · k={selectedK}</p>
+        <p className="text-sm text-slate-400 mb-3">منبع: بک‌اند و clustering_evaluation.json · k={selectedK}</p>
         <div className="grid grid-cols-1 lg:grid-cols-3 gap-4">
           <div className="space-y-4">
             <KPICard title="k انتخاب‌شده" value={selectedK} subtitle="بر اساس Silhouette" badge="Clustering" />
@@ -407,25 +323,25 @@ export default function MonitoringTab({ defaultPlotLayout, nlpEval, clusters, to
         </div>
       </section>
 
-      {/* ========== Recommender ========== */}
+      {/* ========== سیستم توصیه گر هوشمند ========== */}
       <section>
-        <h2 className="text-lg font-bold text-white mb-1">سیستم توصیه‌گر هوشمند</h2>
-        <p className="text-sm text-slate-400 mb-3">معماری هیبریدی · Embedding + Clustering + Intent</p>
+        <h2 className="text-lg font-bold text-white mb-1">سیستم توصیه گر هوشمند</h2>
+        <p className="text-sm text-slate-400 mb-3">معماری هیبریدی · {recommender.architecture || 'Embedding + Clustering + Intent'}</p>
         <div className="grid grid-cols-1 lg:grid-cols-3 gap-4">
           <div className="space-y-4">
             <KPICard title="معماری" value="Hybrid" subtitle="چندلایه امتیازدهی" badge="Recommender" />
             <KPICard title="ورودی‌ها" value="۳ منبع" subtitle="متن · خوشه · رفتار" badge="سیگنال" />
-            <KPICard title="وضعیت" value="فعال" subtitle="دستیار گفتگویی آنلاین" badge="Status" highlight />
+            <KPICard title="وضعیت" value={recommender.status || "فعال"} subtitle="دستیار گفتگویی آنلاین" badge="Status" highlight />
           </div>
           <div className="lg:col-span-2 bg-[#0b1120] border border-slate-800/90 rounded-xl p-4">
-            <h3 className="text-[15px] font-semibold text-slate-100 mb-3">وزن نسبی لایه‌های امتیازدهی</h3>
+            <h3 className="text-[15px] font-semibold text-slate-100 mb-3">وزن نسبی لایه‌های امتیازدهی (دریافت پویا از بک‌اند)</h3>
             <div className="h-52">
               <SafePlot
                 data={[{
                   type: 'bar',
-                  x: ['شباهت معنایی', 'خوشه کالا', 'تعامل کاربر', 'فیلتر دسته'],
-                  y: [0.92, 0.85, 0.78, 0.70],
-                  text: ['۹۲٪', '۸۵٪', '۷۸٪', '۷۰٪'],
+                  x: recLayers.map(l => l.name),
+                  y: recLayers.map(l => l.weight),
+                  text: recLayers.map(l => `${(l.weight * 100).toFixed(0)}٪`),
                   textposition: 'outside',
                   textfont: { size: 15, color: '#f1f5f9', family: 'Vazirmatn, Tahoma' },
                   marker: { color: ['#06b6d4', '#14b8a6', '#8b5cf6', '#f59e0b'] }

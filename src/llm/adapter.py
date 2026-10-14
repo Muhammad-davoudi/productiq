@@ -3,10 +3,8 @@ from dotenv import load_dotenv, find_dotenv
 from sqlalchemy import create_engine, text
 from langchain_core.tools import tool
 
-# بارگذاری تنظیمات
 load_dotenv(find_dotenv())
 
-# ساخت URL اتصال از اجزای موجود در .env
 db_user = os.getenv("DB_USER")
 db_password = os.getenv("DB_PASSWORD")
 db_host = os.getenv("DB_HOST", "localhost")
@@ -21,33 +19,25 @@ engine = create_engine(DATABASE_URL)
 
 @tool
 def search_products(query: str):
-    """Search for products by title."""
-    # لیست کلمات ممنوعه را اینجا مدیریت کنید
-    excluded_keywords = [
-        'بازی', 'آموزشی', 'کتاب', 'کفش', 'لوازم آرایشی', 
-        'کوله', 'لوازم منزل', 'لوازم کودک', 'کفش ورزشی', 
-        'کفش زنانه مجلسی'
-    ]
-    
-    # ساخت بخش فیلتر به صورت پویا
-    filter_sql = ""
-    params = {"query": f"%{query}%"}
-    
-    for i, kw in enumerate(excluded_keywords):
-        param_name = f"ex_{i}"
-        filter_sql += f" AND title_fa NOT ILIKE :{param_name}"
-        params[param_name] = f"%{kw}%"
-        
-    sql = text(f"""
-        SELECT title_fa, price FROM products_curated 
-        WHERE title_fa ILIKE :query 
-        {filter_sql}
+    """Search for products by title using keyword matching or partial terms."""
+    # پاکسازی کلمات عام مانند "گوشی خوب" یا "کتاب" برای جستجوی بهتر
+    cleaned_query = query.replace("خوب", "").replace("چی داری", "").strip()
+    if not cleaned_query or len(cleaned_query) < 2:
+        cleaned_query = query
+
+    params = {"query": f"%{cleaned_query}%"}
+
+    sql = text("""
+        SELECT title_fa, price FROM products_curated
+        WHERE title_fa ILIKE :query
         LIMIT 5
     """)
-    
+
     with engine.connect() as conn:
         result = conn.execute(sql, params)
         products = result.fetchall()
+        if not products:
+            return f"متأسفانه محصولی با عنوان یا ویژگی '{query}' یافت نشد."
         return [{"title": p[0], "price": f"{p[1]:,.0f} تومان"} for p in products]
 
 @tool
@@ -58,14 +48,28 @@ def get_categories():
         return [row[0] for row in result.fetchall()]
 
 @tool
-def search_by_price(max_price: int):
-    """Filter products by maximum price."""
+def search_by_price(max_price: int, keyword: str = ""):
+    """Filter products by maximum price and optional keyword (e.g. mobile, watch)."""
+    if keyword:
+        sql = text("""
+            SELECT title_fa, price FROM products_curated 
+            WHERE price <= :max_price AND title_fa ILIKE :keyword
+            LIMIT 5
+        """)
+        params = {"max_price": max_price, "keyword": f"%{keyword}%"}
+    else:
+        sql = text("""
+            SELECT title_fa, price FROM products_curated 
+            WHERE price <= :max_price 
+            LIMIT 5
+        """)
+        params = {"max_price": max_price}
+
     with engine.connect() as conn:
-        result = conn.execute(
-            text("SELECT title_fa, price FROM products_curated WHERE price <= :max_price LIMIT 5"),
-            {"max_price": max_price}
-        )
+        result = conn.execute(sql, params)
         products = result.fetchall()
+        if not products:
+            return f"هیچ محصولی با قیمت زیر {max_price:,.0f} تومان یافت نشد."
         return [{"title": p[0], "price": f"{p[1]:,.0f} تومان"} for p in products]
 
 @tool
@@ -73,10 +77,12 @@ def search_exact(product_name: str):
     """Search for an exact product name."""
     with engine.connect() as conn:
         result = conn.execute(
-            text("SELECT title_fa, price FROM products_curated WHERE title_fa = :name LIMIT 5"),
-            {"name": product_name}
+            text("SELECT title_fa, price FROM products_curated WHERE title_fa ILIKE :name LIMIT 5"),
+            {"name": f"%{product_name}%"}
         )
         products = result.fetchall()
+        if not products:
+            return f"محصولی با نام {product_name} پیدا نشد."
         return [{"title": p[0], "price": f"{p[1]:,.0f} تومان"} for p in products]
 
 from src.recommendation.recommender import ContentRecommender

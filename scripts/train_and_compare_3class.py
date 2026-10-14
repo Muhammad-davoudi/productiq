@@ -24,46 +24,8 @@ def advanced_normalize(text: str) -> str:
     text = re.sub(r'[^\w\s\!\?]', ' ', text)
     return re.sub(r'[\r\n\t]+', ' ', text).strip()
 
-class PersianAdvancedFeatureExtractor(BaseEstimator, TransformerMixin):
-    def __init__(self):
-        self.pos_words = {
-            "عالی", "خوب", "فوق‌العاده", "فوق العاده", "راضی", "عالیه", "خوبه",
-            "کیفیت", "پیشنهاد", "مناسب", "کاربردی", "زیبا", "تمیز", "خوش‌دست",
-            "سالم", "دوست‌داشتنی", "ارزش", "محکم", "شیک", "مرتب", "مطلوب", "عالییی"
-        }
-        self.neg_words = {
-            "بد", "افتضاح", "خراب", "ناراضی", "حیف", "مرجوع", "نمی‌ارزه", "ضعیف",
-            "کثیف", "سخت", "شکسته", "تقلبی", "گران", "گرون", "بی‌کیفیت", "ناامید",
-            "نخرید", "اشتباه", "داغون", "پشیمان", "پشیمون", "کوچیک", "افتضاحه"
-        }
-        self.negation_words = {"نه", "نمی", "نیست", "نبود", "نشد", "اصلا", "هیچ", "بدون"}
-
-    def fit(self, X, y=None):
-        return self
-
-    def transform(self, X):
-        features = []
-        for text in X:
-            if not isinstance(text, str):
-                features.append([0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0])
-                continue
-            words = text.split()
-            n_words = max(len(words), 1)
-            
-            pos_cnt = sum(1 for w in words if any(pw in w for pw in self.pos_words))
-            neg_cnt = sum(1 for w in words if any(nw in w for nw in self.neg_words))
-            negate_cnt = sum(1 for w in words if any(nw in w for nw in self.negation_words))
-            
-            excl_count = text.count('!')
-            quest_count = text.count('?')
-            
-            pos_ratio = pos_cnt / n_words
-            neg_ratio = neg_cnt / n_words
-            polarity_diff = (pos_cnt - neg_cnt) / (pos_cnt + neg_cnt + 1.0)
-            
-            features.append([pos_cnt, neg_cnt, pos_ratio, neg_ratio, polarity_diff, excl_count, quest_count])
-        return np.array(features)
-
+from src.nlp.feature_engineering import PersianAdvancedFeatureExtractor
+from src.nlp.feature_engineering import PersianAdvancedFeatureExtractor
 def map_rate_to_label(rate):
     try:
         r = float(rate)

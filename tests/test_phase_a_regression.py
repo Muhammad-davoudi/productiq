@@ -1,5 +1,5 @@
 import sys
-from src.llm.service import AssistantService
+from src.llm.service import AssistantService, ALL_TOOLS, TOOL_MAP
 from src.llm.adapter import (
     search_products,
     get_categories,
@@ -10,7 +10,6 @@ from src.llm.adapter import (
 
 def run_regression_checks():
     print("--- 1. Testing Tool Registry Integrity ---")
-    service = AssistantService()
     expected_order = [
         "search_products",
         "get_categories",
@@ -18,7 +17,7 @@ def run_regression_checks():
         "search_exact",
         "recommend_similar_products"
     ]
-    registered_names = [t.name for t in service.tools]
+    registered_names = [t.name for t in ALL_TOOLS]
     print(f"Registered tools: {registered_names}")
     assert registered_names == expected_order, f"Tool order mismatch! Expected: {expected_order}, got: {registered_names}"
     print("Check 1 Passed: 4 original tools preserved in order, new tool added as 5th.")
@@ -37,7 +36,7 @@ def run_regression_checks():
     print(f"search_by_price passed (returned {len(pr_res)} items)")
 
     ex_res = search_exact.invoke({"product_name": "نامعتبر_وجود_ندارد"})
-    assert isinstance(ex_res, list) and len(ex_res) == 0
+    assert isinstance(ex_res, str) and "پیدا نشد" in ex_res
     print("search_exact passed")
 
     print("\n--- 3. Testing Direct Execution of New Recommendation Tool ---")
@@ -50,6 +49,7 @@ def run_regression_checks():
     print("recommend_similar_products empty input handling passed")
 
     print("\n--- 4. Testing End-to-End LLM Service Execution ---")
+    service = AssistantService()
     reply = service.process_input("test_session_id", "یک کالای مشابه گوشی سامسونگ پیشنهاد بده")
     print(f"LLM Reply:\n{reply}\n")
     assert "*" not in reply, "Markdown asterisks (*) found in response!"

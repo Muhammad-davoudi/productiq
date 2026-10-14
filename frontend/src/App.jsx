@@ -39,6 +39,7 @@ export default function App() {
   const [satisfaction, setSatisfaction] = useState([]);
   const [clusters, setClusters] = useState([]);
   const [nlpEval, setNlpEval] = useState(null);
+  const [clusterProfiles, setClusterProfiles] = useState(clusterProfilesData || []);
 
   const [selectedClusterId, setSelectedClusterId] = useState(null);
 
@@ -62,8 +63,11 @@ export default function App() {
     const catQuery = selectedCategory !== 'ALL' ? `?category=${encodeURIComponent(selectedCategory)}` : '';
     
     try {
+      const isDev = window.location.port === '5173';
+      const clusterProfUrl = isDev ? 'http://127.0.0.1:8000/api/clustering/profiles' : '/api/clustering/profiles';
+
       const [
-        sumRes, subRes, brandRes, priceRes, scatterRes, satRes, clusterRes, nlpRes
+        sumRes, subRes, brandRes, priceRes, scatterRes, satRes, clusterRes, nlpRes, clusterProfRes
       ] = await Promise.all([
         fetch(getApiUrl('summary', catQuery)).then(r => r.json()).catch(() => null),
         fetch(getApiUrl('subcategories', catQuery)).then(r => r.json()).catch(() => null),
@@ -72,7 +76,8 @@ export default function App() {
         fetch(getApiUrl('price-rating', catQuery)).then(r => r.json()).catch(() => null),
         fetch(getApiUrl('satisfaction', catQuery)).then(r => r.json()).catch(() => null),
         fetch(getApiUrl('clustering-overview', catQuery)).then(r => r.json()).catch(() => null),
-        fetch(getApiUrl('nlp-overview', catQuery)).then(r => r.json()).catch(() => null)
+        fetch(getApiUrl('nlp-overview', catQuery)).then(r => r.json()).catch(() => null),
+        fetch(clusterProfUrl).then(r => r.json()).catch(() => null)
       ]);
 
       if (sumRes) setSummary(sumRes);
@@ -83,6 +88,9 @@ export default function App() {
       if (satRes && satRes.items) setSatisfaction(satRes.items);
       if (clusterRes && clusterRes.items) setClusters(clusterRes.items);
       if (nlpRes && nlpRes.model) setNlpEval(nlpRes);
+      if (clusterProfRes && Array.isArray(clusterProfRes) && clusterProfRes.length > 0) {
+        setClusterProfiles(clusterProfRes);
+      }
     } catch (err) {
       console.warn('API sync error:', err);
     } finally {
@@ -91,6 +99,7 @@ export default function App() {
   };
 
   useEffect(() => {
+    const catQuery = '';
     fetchData();
   }, [selectedCategory]);
 
@@ -139,12 +148,26 @@ export default function App() {
     </div>
   );
 
-  const clusterProfiles = Array.isArray(clusterProfilesData) && clusterProfilesData.length > 0
-    ? clusterProfilesData
-    : clusters;
+// clusterProfiles is managed by useState and fetched via API
 
-  const nlpSummary = cleanNlpData?.summary || { Positive: 0, Neutral: 0, Negative: 0, total: 1 };
-  const nlpAspects = Array.isArray(cleanNlpData?.aspects) ? cleanNlpData.aspects : [];
+    const [nlpSummary, setNlpSummary] = useState(cleanNlpData?.summary || { Positive: 0, Neutral: 0, Negative: 0, total: 1 });
+  const [nlpAspects, setNlpAspects] = useState(Array.isArray(cleanNlpData?.aspects) ? cleanNlpData.aspects : []);
+
+  // بارگذاری زنده اطلاعات NLP از بک‌اند با Fallback به فایل محلی
+  useEffect(() => {
+    const catQuery = '';
+    fetch(getApiUrl('nlp-overview', catQuery))
+      .then(res => res.json())
+      .then(data => {
+        if (data && data.summary) setNlpSummary(data.summary);
+        if (data && Array.isArray(data.aspects)) setNlpAspects(data.aspects);
+      })
+      .catch(() => {
+        // Fallback به داده‌های محلی در صورت بروز خطا
+        if (cleanNlpData?.summary) setNlpSummary(cleanNlpData.summary);
+        if (cleanNlpData?.aspects) setNlpAspects(cleanNlpData.aspects);
+      });
+  }, []);
 
   return (
     <div className="min-h-screen bg-[#070b14] text-slate-100 p-4 lg:p-6 font-sans select-none" dir="rtl">
@@ -275,7 +298,7 @@ export default function App() {
               <h2 className="text-sm font-semibold text-slate-200 mb-3">
                 تنوع و سهم محصولات در زیردسته‌ها: {selectedCategoryLabel}
               </h2>
-              <div className="h-72">
+              <div className="h-80">
                 <SafePlot
                   key={`sub-${selectedCategory}`}
                   data={[{
@@ -304,7 +327,7 @@ export default function App() {
               <h2 className="text-sm font-semibold text-slate-200 mb-3">
                 ترکیب برندهای برتر: {selectedCategoryLabel}
               </h2>
-              <div className="h-72">
+              <div className="h-80">
                 <SafePlot
                   key={`brand-${selectedCategory}`}
                   data={[{
@@ -335,7 +358,7 @@ export default function App() {
               <h2 className="text-sm font-semibold text-slate-200 mb-3">
                 توزیع بازه‌های قیمتی: {selectedCategoryLabel}
               </h2>
-              <div className="h-72">
+              <div className="h-80">
                 <SafePlot
                   key={`dist-${selectedCategory}`}
                   data={[{
@@ -359,7 +382,7 @@ export default function App() {
               <h2 className="text-sm font-semibold text-slate-200 mb-3">
                 رابطه میانگین قیمت و امتیاز رضایت: {selectedCategoryLabel}
               </h2>
-              <div className="h-72">
+              <div className="h-80">
                 <SafePlot
                   key={`rate-price-${selectedCategory}`}
                   data={[{
@@ -444,8 +467,8 @@ export default function App() {
 
           <div className="grid grid-cols-1 lg:grid-cols-2 gap-4">
             <div className="bg-[#0b1120] border border-slate-800/90 rounded-xl p-4">
-              <h2 className="text-sm font-semibold text-slate-200 mb-3">سهم درصدی خوشه‌های کالا از کل کاتالوگ</h2>
-              <div className="h-72">
+              <h2 className="text-base font-bold text-slate-100 mb-3 flex items-center gap-2"><span className="w-2 h-2 rounded-full bg-cyan-400"></span>سهم درصدی خوشه‌های کالا از کل کاتالوگ</h2>
+              <div className="h-80">
                 <SafePlot
                   data={[{
                     type: 'pie',
@@ -455,9 +478,15 @@ export default function App() {
                     marker: { colors: ['#3b82f6', '#14b8a6', '#f59e0b', '#8b5cf6', '#64748b'] },
                     textinfo: 'percent',
                     textposition: 'inside',
+                    insidetextfont: { size: 14, color: '#ffffff', family: 'Vazirmatn, Tahoma, sans-serif' },
                     hovertemplate: '%{label}<br>تعداد: %{value:,}<br>سهم: %{percent}<extra></extra>'
                   }]}
-                  layout={{ ...defaultPlotLayout, showlegend: true, margin: { t: 20, r: 20, b: 70, l: 20 } }}
+                  layout={{
+                    ...defaultPlotLayout,
+                    showlegend: true,
+                    legend: { font: { size: 13, color: '#e2e8f0', family: 'Vazirmatn, Tahoma, sans-serif' }, orientation: 'h', y: -0.15 },
+                    margin: { t: 15, r: 15, b: 65, l: 15 }
+                  }}
                   style={{ width: '100%', height: '100%' }}
                   config={{ displayModeBar: false, responsive: true }}
                 />
@@ -465,8 +494,8 @@ export default function App() {
             </div>
 
             <div className="bg-[#0b1120] border border-slate-800/90 rounded-xl p-4">
-              <h2 className="text-sm font-semibold text-slate-200 mb-3">میانه قیمت در هر خوشه (تومان)</h2>
-              <div className="h-72">
+              <h2 className="text-base font-bold text-slate-100 mb-3 flex items-center gap-2"><span className="w-2 h-2 rounded-full bg-teal-400"></span>میانه قیمت در هر خوشه (تومان)</h2>
+              <div className="h-80">
                 <SafePlot
                   data={[{
                     type: 'bar',
@@ -474,9 +503,21 @@ export default function App() {
                     y: clusterProfiles.map(c => Number(c.price_median) || 0),
                     marker: { color: '#0d9488' },
                     text: clusterProfiles.map(c => toPersianNum(c.price_median)),
-                    textposition: 'outside'
+                    textposition: 'outside',
+                    textfont: { size: 13, color: '#cbd5e1', family: 'Vazirmatn, Tahoma, sans-serif' }
                   }]}
-                  layout={{ ...defaultPlotLayout, margin: { t: 30, r: 15, b: 70, l: 60 } }}
+                  layout={{
+                    ...defaultPlotLayout,
+                    xaxis: {
+                      ...defaultPlotLayout.xaxis,
+                      tickfont: { size: 13, color: '#e2e8f0', family: 'Vazirmatn, Tahoma, sans-serif' }
+                    },
+                    yaxis: {
+                      ...defaultPlotLayout.yaxis,
+                      tickfont: { size: 13, color: '#cbd5e1', family: 'Vazirmatn, Tahoma, sans-serif' }
+                    },
+                    margin: { t: 30, r: 20, b: 75, l: 75 }
+                  }}
                   style={{ width: '100%', height: '100%' }}
                   config={{ displayModeBar: false, responsive: true }}
                 />
@@ -484,8 +525,8 @@ export default function App() {
             </div>
 
             <div className="bg-[#0b1120] border border-slate-800/90 rounded-xl p-4">
-              <h2 className="text-sm font-semibold text-slate-200 mb-3">میانگین امتیاز رضایت در هر خوشه</h2>
-              <div className="h-72">
+              <h2 className="text-base font-bold text-slate-100 mb-3 flex items-center gap-2"><span className="w-2 h-2 rounded-full bg-emerald-400"></span>میانگین امتیاز رضایت در هر خوشه</h2>
+              <div className="h-80">
                 <SafePlot
                   data={[{
                     type: 'bar',
@@ -493,9 +534,22 @@ export default function App() {
                     y: clusterProfiles.map(c => Number(c.rate_mean) || 0),
                     text: clusterProfiles.map(c => Number(c.rate_mean || 0).toFixed(2)),
                     textposition: 'outside',
+                    textfont: { size: 13, color: '#e2e8f0', family: 'Vazirmatn, Tahoma, sans-serif' },
                     marker: { color: clusterProfiles.map(c => (Number(c.rate_mean) || 0) >= 3.5 ? '#22c55e' : (Number(c.rate_mean) || 0) >= 2.5 ? '#eab308' : '#ef4444') }
                   }]}
-                  layout={{ ...defaultPlotLayout, margin: { t: 35, r: 20, b: 70, l: 50 }, yaxis: { ...defaultPlotLayout.yaxis, range: [0, 5] } }}
+                  layout={{
+                    ...defaultPlotLayout,
+                    xaxis: {
+                      ...defaultPlotLayout.xaxis,
+                      tickfont: { size: 13, color: '#e2e8f0', family: 'Vazirmatn, Tahoma, sans-serif' }
+                    },
+                    yaxis: {
+                      ...defaultPlotLayout.yaxis,
+                      range: [0, 5],
+                      tickfont: { size: 13, color: '#cbd5e1', family: 'Vazirmatn, Tahoma, sans-serif' }
+                    },
+                    margin: { t: 35, r: 20, b: 75, l: 55 }
+                  }}
                   style={{ width: '100%', height: '100%' }}
                   config={{ displayModeBar: false, responsive: true }}
                 />
@@ -503,8 +557,8 @@ export default function App() {
             </div>
 
             <div className="bg-[#0b1120] border border-slate-800/90 rounded-xl p-4">
-              <h2 className="text-sm font-semibold text-slate-200 mb-3">امضای رفتاری و مقایسه چندبعدی خوشه‌ها (Radar Chart)</h2>
-              <div className="h-72">
+              <h2 className="text-base font-bold text-slate-100 mb-3 flex items-center gap-2"><span className="w-2 h-2 rounded-full bg-purple-400"></span>امضای رفتاری و مقایسه چندبعدی خوشه‌ها (Radar Chart)</h2>
+              <div className="h-80">
                 <SafePlot
                   data={(() => {
                     const radarColors = ['#38bdf8', '#14b8a6', '#f59e0b', '#a855f7', '#64748b'];
@@ -534,11 +588,24 @@ export default function App() {
                     ...defaultPlotLayout,
                     polar: {
                       bgcolor: 'rgba(15, 23, 42, 0.4)',
-                      radialaxis: { visible: true, range: [0, 100], gridcolor: '#1e293b' },
-                      angularaxis: { gridcolor: '#1e293b' }
+                      radialaxis: {
+                        visible: true,
+                        range: [0, 100],
+                        gridcolor: '#1e293b',
+                        tickfont: { size: 11, color: '#94a3b8', family: 'Vazirmatn, Tahoma, sans-serif' }
+                      },
+                      angularaxis: {
+                        gridcolor: '#1e293b',
+                        tickfont: { size: 13, color: '#e2e8f0', family: 'Vazirmatn, Tahoma, sans-serif' }
+                      }
+                    },
+                    legend: {
+                      font: { size: 13, color: '#e2e8f0', family: 'Vazirmatn, Tahoma, sans-serif' },
+                      orientation: 'h',
+                      y: -0.15
                     },
                     showlegend: true,
-                    margin: { t: 25, r: 40, b: 50, l: 40 }
+                    margin: { t: 30, r: 40, b: 65, l: 40 }
                   }}
                   style={{ width: '100%', height: '100%' }}
                   config={{ displayModeBar: false, responsive: true }}
@@ -555,7 +622,7 @@ export default function App() {
                   <span className="w-2.5 h-2.5 rounded-full bg-cyan-400"></span>
                   شناسنامه و رفتارشناسی تخصصی خوشه‌های کالا (Cluster Profiles)
                 </h2>
-                <p className="text-xs text-slate-400 mt-0.5">
+                <p className="text-sm text-slate-400 mt-1">
                   تحلیل دامنه قیمتی، میانگین تعامل کاربران و نرخ وفاداری استخراج‌شده از الگوریتم دو مرحله‌ای
                 </p>
               </div>
@@ -581,7 +648,7 @@ export default function App() {
                     <div className="flex items-center justify-between border-b border-slate-800/60 pb-2.5">
                       <div className="flex items-center gap-2">
                         <span className="w-2 h-2 rounded-full bg-cyan-400"></span>
-                        <h3 className="text-sm font-bold text-cyan-300">{cp.title || `خوشه شماره ${cp.cluster}`}</h3>
+                        <h3 className="text-base font-bold text-cyan-300">{cp.title || `خوشه شماره ${cp.cluster}`}</h3>
                       </div>
                       <span className={`text-[10px] px-2 py-0.5 rounded font-semibold border ${
                         isActive ? 'bg-teal-950 text-teal-300 border-teal-700/60' : 'bg-slate-800 text-slate-400 border-slate-700'
@@ -592,26 +659,26 @@ export default function App() {
 
                     <div className="grid grid-cols-2 gap-2 text-xs">
                       <div className="bg-[#070d1a] p-2 rounded-lg border border-slate-800/70">
-                        <span className="text-slate-400 block text-[11px]">تعداد کالا</span>
+                        <span className="text-slate-400 block text-xs">تعداد کالا</span>
                         <strong className="text-slate-100 text-sm">{toPersianNum(cp.total_products)}</strong>
                       </div>
                       <div className="bg-[#070d1a] p-2 rounded-lg border border-slate-800/70">
-                        <span className="text-slate-400 block text-[11px]">سهم بازار</span>
+                        <span className="text-slate-400 block text-xs">سهم بازار</span>
                         <strong className="text-slate-100 text-sm">{toPersianNum(cp.share_pct)}٪</strong>
                       </div>
                       <div className="bg-[#070d1a] p-2 rounded-lg border border-slate-800/70">
-                        <span className="text-slate-400 block text-[11px]">میانه قیمت</span>
+                        <span className="text-slate-400 block text-xs">میانه قیمت</span>
                         <strong className="text-slate-100">{toPersianNum(cp.price_median)} <span className="text-[10px] text-slate-500">تومان</span></strong>
                       </div>
                       <div className="bg-[#070d1a] p-2 rounded-lg border border-slate-800/70">
-                        <span className="text-slate-400 block text-[11px]">میانگین امتیاز</span>
+                        <span className="text-slate-400 block text-xs">میانگین امتیاز</span>
                         <strong className={`font-mono text-sm ${rate >= 3.5 ? 'text-emerald-400' : rate >= 2 ? 'text-amber-400' : 'text-rose-400'}`}>
                           {rate.toFixed(2)} ★
                         </strong>
                       </div>
                     </div>
 
-                    <div className="pt-2 border-t border-slate-800/60 text-[11px] text-slate-400 space-y-1">
+                    <div className="pt-2 border-t border-slate-800/60 text-xs text-slate-300 space-y-1.5">
                       <div className="flex justify-between">
                         <span>دامنه قیمت:</span>
                         <span className="text-slate-300">{toPersianNum(cp.price_min)} تا {toPersianNum(cp.price_max)} تومان</span>
@@ -634,10 +701,10 @@ export default function App() {
           {/* جدول ماتریس مشخصات خوشه‌ها */}
           <div className="bg-[#0b1120] border border-slate-800/90 rounded-2xl p-5 overflow-x-auto space-y-3">
             <div className="flex items-center justify-between">
-              <h3 className="text-sm font-semibold text-slate-200">جدول ماتریس مشخصات خوشه‌ها (Cluster Feature Matrix)</h3>
-              <span className="text-[11px] text-slate-500">منبع داده: cluster_profiles.csv</span>
+              <h3 className="text-base font-bold text-slate-100 flex items-center gap-2"><span className="w-2.5 h-2.5 rounded-full bg-cyan-400"></span>جدول ماتریس مشخصات خوشه‌ها (Cluster Feature Matrix)</h3>
+              <span className="text-xs text-slate-400 bg-slate-800/80 px-2.5 py-1 rounded-md border border-slate-700/60">منبع داده: cluster_profiles.csv</span>
             </div>
-            <table className="w-full text-right text-xs text-slate-300">
+            <table className="w-full text-right text-sm text-slate-200">
               <thead className="bg-[#151e33] text-slate-400 border-b border-slate-700">
                 <tr>
                   <th className="py-3 px-3">شناسه</th>
@@ -712,7 +779,7 @@ export default function App() {
                       },
                       textinfo: 'percent',
                       textposition: 'inside',
-                      textfont: { size: 14, color: '#ffffff', family: 'Vazirmatn, Tahoma' },
+                      textfont: { size: 15, color: '#ffffff', family: 'Vazirmatn, Tahoma' },
                       hovertemplate: '%{label}<br>تعداد: %{value:,}<br>سهم: %{percent}<extra></extra>'
                     }]}
                     layout={{
@@ -723,7 +790,7 @@ export default function App() {
                         y: -0.18,
                         x: 0.5,
                         xanchor: 'center',
-                        font: { size: 13, color: '#e2e8f0', family: 'Vazirmatn, Tahoma' }
+                        font: { size: 14, color: '#e2e8f0', family: 'Vazirmatn, Tahoma' }
                       },
                       margin: { t: 10, r: 10, b: 35, l: 10 }
                     }}
@@ -848,8 +915,8 @@ export default function App() {
                   layout={{
                     ...defaultPlotLayout,
                     margin: { t: 30, r: 50, b: 65, l: 110 },
-                    xaxis: { tickfont: { size: 13, color: '#e2e8f0', family: 'Vazirmatn, Tahoma' }, side: 'bottom', showgrid: false },
-                    yaxis: { tickfont: { size: 13, color: '#e2e8f0', family: 'Vazirmatn, Tahoma' }, showgrid: false, autorange: 'reversed' }
+                    xaxis: { tickfont: { size: 14, color: '#e2e8f0', family: 'Vazirmatn, Tahoma' }, side: 'bottom', showgrid: false },
+                    yaxis: { tickfont: { size: 14, color: '#e2e8f0', family: 'Vazirmatn, Tahoma' }, showgrid: false, autorange: 'reversed' }
                   }}
                   style={{ width: '100%', height: '100%' }}
                   config={{ displayModeBar: false, responsive: true }}

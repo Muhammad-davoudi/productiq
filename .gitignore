@@ -1,76 +1,42 @@
-# Environment & Secrets
 .env
-.env.*
-!.env.example
+A.txt
 
-# Python & Virtual Environments
-__pycache__/
-*.py[cod]
-*$py.class
-*.so
-.Python
+# Python
 .venv/
-env/
 venv/
-ENV/
-build/
-dist/
-*.egg-info/
+__pycache__/
+*.pyc
+.pytest_cache/
+.mypy_cache/
 
-# Heavy datasets and local model artifacts
-data/
-models/
-mlruns/
-kafka_*.tgz
-*.npy
-*.pkl
-*.joblib
-*.zip
-*.bin
-*.vec
-*.csv
-
-# Archives & Temporary files
-_archive_phase0/
-.legacy_backup/
-*.log
-*.bak
-*.backup
-*.broken-*
-*.failed-*
-
-# Node & Frontend
-node_modules/
+# Frontend
 frontend/node_modules/
 frontend/dist/
-.npm
-.eslintcache
 
-# Media & OS
-*.png
-*.jpg
-*.jpeg
-.vscode/
-.idea/
-.DS_Store
-Thumbs.db
+# Logs
+*.log
 
-# --- Phase 0.7: Added by Digikala AI Cleanup Plan ---
-# Kafka archive & logs
-kafka_2.13-3.7.0.tgz
-logs/
-kafka-logs/
-zookeeper-data/
-
-# Python & Virtualenv
-__pycache__/
-*.py[cod]
-.venv/
-env/
-
-# MLflow, Large Models & Embeddings
+# MLflow / backups / local infra
 mlruns/
-models/*.bin
-models/*.vec
-*.npy
+backup/
+kafka_2.13-3.7.0/
+kafka_2.13-3.7.0.tgz
+
+# Data and generated artifacts
+data/
+src/data/
+frontend/src/data/
+
+# Heavy model artifacts
+models/
+!models/
+!models/baseline_sentiment.joblib
+!models/online_cluster_classifier.joblib
+!models/sentiment_model.pkl
+
+# Extra heavy binaries / vectors / archives / arrays
+*.bin
+*.vec
 *.zip
+*.npy
+*.npz
