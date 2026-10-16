@@ -14,22 +14,22 @@ db_name = os.getenv("DB_NAME")
 if not all([db_user, db_password, db_name]):
     raise ValueError("اطلاعات اتصال دیتابیس در فایل .env یافت نشد.")
 
-DATABASE_URL = f"postgresql://{db_user}:{db_password}@{db_host}:{db_port}/{db_name}"
+DATABASE_URL = f"postgresql+psycopg2://{db_user}:{db_password}@{db_host}:{db_port}/{db_name}"
 engine = create_engine(DATABASE_URL)
 
 @tool
 def search_products(query: str):
-    """Search for products by title using keyword matching or partial terms."""
-    # پاکسازی کلمات عام مانند "گوشی خوب" یا "کتاب" برای جستجوی بهتر
-    cleaned_query = query.replace("خوب", "").replace("چی داری", "").strip()
+    """Search for products by title or category using keyword matching or partial terms."""
+    cleaned_query = query.replace("خوب", "").replace("چی داری", "").replace("کتاب", "").strip()
     if not cleaned_query or len(cleaned_query) < 2:
         cleaned_query = query
 
-    params = {"query": f"%{cleaned_query}%"}
+    params = {"query": f"%{query}%", "cleaned": f"%{cleaned_query}%"}
 
     sql = text("""
         SELECT title_fa, price FROM products_curated
-        WHERE title_fa ILIKE :query
+        WHERE title_fa ILIKE :query OR category1 ILIKE :query OR category2 ILIKE :query
+           OR title_fa ILIKE :cleaned OR category1 ILIKE :cleaned
         LIMIT 5
     """)
 
@@ -44,7 +44,7 @@ def search_products(query: str):
 def get_categories():
     """List available product categories."""
     with engine.connect() as conn:
-        result = conn.execute(text("SELECT DISTINCT category1 FROM products_curated LIMIT 5"))
+        result = conn.execute(text("SELECT DISTINCT category1 FROM products_curated WHERE category1 IS NOT NULL LIMIT 10"))
         return [row[0] for row in result.fetchall()]
 
 @tool
@@ -52,15 +52,15 @@ def search_by_price(max_price: int, keyword: str = ""):
     """Filter products by maximum price and optional keyword (e.g. mobile, watch)."""
     if keyword:
         sql = text("""
-            SELECT title_fa, price FROM products_curated 
-            WHERE price <= :max_price AND title_fa ILIKE :keyword
+            SELECT title_fa, price FROM products_curated
+            WHERE price <= :max_price AND (title_fa ILIKE :keyword OR category1 ILIKE :keyword)
             LIMIT 5
         """)
         params = {"max_price": max_price, "keyword": f"%{keyword}%"}
     else:
         sql = text("""
-            SELECT title_fa, price FROM products_curated 
-            WHERE price <= :max_price 
+            SELECT title_fa, price FROM products_curated
+            WHERE price <= :max_price
             LIMIT 5
         """)
         params = {"max_price": max_price}
@@ -77,7 +77,7 @@ def search_exact(product_name: str):
     """Search for an exact product name."""
     with engine.connect() as conn:
         result = conn.execute(
-            text("SELECT title_fa, price FROM products_curated WHERE title_fa ILIKE :name LIMIT 5"),
+            text("SELECT title_fa, price FROM products_curated WHERE title_fa ILIKE :name OR category1 ILIKE :name LIMIT 5"),
             {"name": f"%{product_name}%"}
         )
         products = result.fetchall()

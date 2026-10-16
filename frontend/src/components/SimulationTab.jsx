@@ -52,12 +52,8 @@ export default function SimulationTab() {
           setEvalId(res.data.eval_id);
           setStatus("running");
           localStorage.setItem("kafka_eval_id", res.data.eval_id.toString());
-        } else if (!res.data.eval_id) {
-          if (evalId && status !== "running") {
-            // حفظ برای مشاهده گزارش
-          } else {
-            setStatus("idle");
-          }
+        } else {
+          setStatus("idle");
         }
       } catch (err) {
         console.error("Error checking active simulation:", err);
@@ -74,7 +70,9 @@ export default function SimulationTab() {
       try {
         const res = await axios.get(`/api/kafka_evaluation/status/${evalId}`);
         setData(res.data);
-        setStatus(res.data.status);
+        if (res.data.status) {
+          setStatus(res.data.status);
+        }
         if (res.data.status === "stopped") {
           if (pollTimerRef.current) clearInterval(pollTimerRef.current);
         }
@@ -93,6 +91,13 @@ export default function SimulationTab() {
 
   const handleStart = async () => {
     setLoading(true);
+    // صفر کردن UI قبل از شروع run جدید
+    if (pollTimerRef.current) {
+      clearInterval(pollTimerRef.current);
+      pollTimerRef.current = null;
+    }
+    setData(null);
+    setStatus("idle");
     try {
       const res = await axios.post("/api/kafka_evaluation/start");
       setEvalId(res.data.eval_id);
@@ -107,24 +112,36 @@ export default function SimulationTab() {
   };
 
   const handleStop = async () => {
-    if (!evalId) return;
+    if (!evalId && status !== "running") return;
     setLoading(true);
     try {
-      await axios.post(`/api/kafka_evaluation/stop/${evalId}`);
-      setStatus("stopped");
-      localStorage.removeItem("kafka_eval_id");
+      if (evalId) {
+        await axios.post(`/api/kafka_evaluation/stop/${evalId}`);
+      }
     } catch (err) {
       console.error("Error stopping simulation:", err);
     } finally {
+      if (pollTimerRef.current) {
+        clearInterval(pollTimerRef.current);
+        pollTimerRef.current = null;
+      }
+      setData(null);
+      setStatus("stopped");
       setLoading(false);
     }
   };
 
   // داده‌های نمودار احساسات
   const sentimentDistribution = data?.sentiment_distribution || [];
-  const sentLabels = sentimentDistribution.map(d => SENTIMENT_TITLES[d.sentiment] || d.sentiment);
-  const sentValues = sentimentDistribution.map(d => d.count);
-  const sentColors = sentimentDistribution.map(d => SENTIMENT_COLORS[d.sentiment] || "#64748B");
+  const sentLabels = sentimentDistribution.map(d => {
+    const key = String(d.sentiment || "").toLowerCase();
+    return SENTIMENT_TITLES[key] || d.sentiment;
+  });
+  const sentValues = sentimentDistribution.map(d => Number(d.count) || 0);
+  const sentColors = sentimentDistribution.map(d => {
+    const key = String(d.sentiment || "").toLowerCase();
+    return SENTIMENT_COLORS[key] || "#6B7280";
+  });
 
   // داده‌های نمودار خوشه‌بندی
   const clusteringDistribution = data?.clustering_distribution || [];
@@ -137,7 +154,7 @@ export default function SimulationTab() {
 
   return (
     <div className="space-y-8 p-6 bg-slate-950 min-h-screen text-slate-100" dir="rtl">
-      
+
       {/* هدر کنترل شبیه‌سازی */}
       <div className="flex flex-col md:flex-row justify-between items-center bg-slate-900 border border-slate-800 p-5 rounded-2xl shadow-xl gap-4">
         <div>
@@ -162,7 +179,7 @@ export default function SimulationTab() {
 
           <button
             onClick={handleStop}
-            disabled={loading || status !== "running"}
+            disabled={loading || (status !== "running" && !evalId)}
             className={`px-6 py-3 rounded-xl font-bold transition-all duration-200 shadow-lg flex items-center gap-2 ${
               status !== "running"
                 ? "bg-slate-800 text-slate-500 cursor-not-allowed border border-slate-700"
@@ -175,23 +192,37 @@ export default function SimulationTab() {
 
           <button
             onClick={async () => {
-              if (window.confirm("آیا مطمئن هستید که می‌خواهید تمام نتایج شبیه‌سازی و داده‌های کافکا را پاک کنید؟")) {
-                try {
-                  const response = await axios.post('/api/kafka_evaluation/reset');
-                  if (response.data.status === 'success') {
-                    if (typeof setSentimentData === 'function') setSentimentData([]);
-                    if (typeof setClusteringData === 'function') setClusteringData([]);
-                    if (typeof setStats === 'function') {
-                      setStats({ messages: 0, sentiment_counts: {}, clustering_counts: {} });
-                    }
-                    alert("شبیه‌سازی و داده‌های پایگاه داده با موفقیت ریست شدند.");
-                  } else {
-                    alert("خطا در ریست کردن اطلاعات: " + response.data.message);
+              if (!window.confirm("آیا مطمئن هستید که می‌خواهید تمام نتایج شبیه‌سازی و داده‌های کافکا را پاک کنید؟")) {
+                return;
+              }
+              setLoading(true);
+              try {
+                // اگر در حال اجرا است، اول stop
+                if (evalId) {
+                  try {
+                    await axios.post(`/api/kafka_evaluation/stop/${evalId}`);
+                  } catch (e) {
+                    console.warn("stop before reset:", e);
                   }
-                } catch (err) {
-                  console.error("Reset error:", err);
-                  alert("خطا در ارتباط با سرور برای ریست کردن داده‌ها.");
                 }
+                try {
+                  await axios.post("/api/kafka_evaluation/reset");
+                } catch (e) {
+                  console.warn("reset api:", e);
+                }
+              } finally {
+                // قطع polling
+                if (pollTimerRef.current) {
+                  clearInterval(pollTimerRef.current);
+                  pollTimerRef.current = null;
+                }
+                // خالی کردن UI
+                setData(null);
+                setEvalId(null);
+                setStatus("idle");
+                localStorage.removeItem("kafka_eval_id");
+                setLoading(false);
+                alert("شبیه‌سازی متوقف و داده‌ها پاک شدند.");
               }
             }}
             className="px-4 py-2 bg-red-600 hover:bg-red-700 text-white font-medium rounded-lg shadow transition flex items-center gap-2"
@@ -234,16 +265,12 @@ export default function SimulationTab() {
       {/* بخش اول: تحلیل احساسات نظرات */}
       {/* ========================================================= */}
       <section className="bg-slate-900/90 border border-slate-800 rounded-3xl p-6 shadow-2xl space-y-6">
-        
-        {/* مشخصات داده احساسات (بدون بچ) */}
         <div className="bg-slate-950/70 border border-slate-800/80 rounded-2xl p-5">
           <div className="flex flex-col sm:flex-row justify-between items-start sm:items-center gap-4">
             <div>
               <h3 className="text-lg font-extrabold text-emerald-400 flex items-center gap-2">
                 <span></span> (Sentiment Streaming)</h3>
             </div>
-            
-            {/* کارت تعداد پیام‌ها */}
             <div className="bg-slate-900 border border-slate-800 px-6 py-3 rounded-xl text-center self-stretch sm:self-auto min-w-[180px]">
               <span className="text-xs text-slate-400 font-medium block">تعداد کل پیام‌های احساسات</span>
               <span className="text-2xl font-black text-emerald-400 font-mono mt-0.5 block">
@@ -253,7 +280,6 @@ export default function SimulationTab() {
           </div>
         </div>
 
-        {/* نمودار بزرگ و باکیفیت احساسات */}
         <div className="bg-slate-950 border border-slate-800/90 rounded-2xl p-4 shadow-inner">
           <Plot
             data={[
@@ -296,16 +322,12 @@ export default function SimulationTab() {
       {/* بخش دوم: خوشه‌بندی برخط کالاها */}
       {/* ========================================================= */}
       <section className="bg-slate-900/90 border border-slate-800 rounded-3xl p-6 shadow-2xl space-y-6">
-        
-        {/* مشخصات داده خوشه‌بندی (بدون بچ) */}
         <div className="bg-slate-950/70 border border-slate-800/80 rounded-2xl p-5">
           <div className="flex flex-col sm:flex-row justify-between items-start sm:items-center gap-4">
             <div>
               <h3 className="text-lg font-extrabold text-blue-400 flex items-center gap-2">
                 <span></span> (Online Clustering 6-Cluster)</h3>
             </div>
-            
-            {/* کارت تعداد پیام‌ها */}
             <div className="bg-slate-900 border border-slate-800 px-6 py-3 rounded-xl text-center self-stretch sm:self-auto min-w-[180px]">
               <span className="text-xs text-slate-400 font-medium block">تعداد کل کالاهای پردازش‌شده</span>
               <span className="text-2xl font-black text-blue-400 font-mono mt-0.5 block">
@@ -315,7 +337,6 @@ export default function SimulationTab() {
           </div>
         </div>
 
-        {/* نمودار بزرگ و باکیفیت خوشه‌بندی */}
         <div className="bg-slate-950 border border-slate-800/90 rounded-2xl p-4 shadow-inner">
           <Plot
             data={[

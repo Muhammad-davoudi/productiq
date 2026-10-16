@@ -1,13 +1,22 @@
 import os
+import sys
 import json
 import psycopg2
 from kafka import KafkaConsumer
 from dotenv import load_dotenv
 
-from src.models.predict import analyze_review
+# ایمپورت پیش‌بینی‌کننده استاندارد احساسات
+from src.models.predict import SentimentPredictor
 
 load_dotenv()
 
+_predictor = None
+
+def get_predictor():
+    global _predictor
+    if _predictor is None:
+        _predictor = SentimentPredictor()
+    return _predictor
 
 def get_db_connection():
     db_url = os.getenv("DATABASE_URL")
@@ -18,12 +27,10 @@ def get_db_connection():
         user=os.getenv("DB_USER", "postgres"),
         password=os.getenv("DB_PASSWORD", ""),
         host=os.getenv("DB_HOST", "localhost"),
-        port=os.getenv("DB_PORT", 5432)
+        port=int(os.getenv("DB_PORT", 5432))
     )
 
-
 def extract_review_text(data: dict) -> str:
-    """Extract review text body from incoming kafka message dictionary."""
     if not isinstance(data, dict):
         return ""
     for field in ("comment", "text", "body", "comment_text", "content"):
@@ -32,28 +39,27 @@ def extract_review_text(data: dict) -> str:
             return val.strip()
     return ""
 
-
-def process_sentiment_message(data: dict) -> tuple[str, str, float | None]:
-    """
-    Process sentiment for a single review message using verified model pipeline.
-    Returns: (review_id, sentiment_label, score)
-    """
+def process_sentiment_message(data: dict) -> tuple[str, str, float]:
     review_id = str(data.get("id") or data.get("review_id") or "")
     text = extract_review_text(data)
 
     if not text:
-        return review_id, "Uncertain", None
+        return review_id, "neutral", 1.0
 
-    try:
-        result = analyze_review(text)
-        sentiment_label = result.get("final", "Uncertain")
-        return review_id, sentiment_label, None
-    except Exception as exc:
-        print(f"Inference failure for review_id '{review_id}': {exc}")
-        return review_id, "InferenceError", None
+    predictor = get_predictor()
+    # ارسال مستقیم متن به Predictor (خروجی مستقیم رشته: positive, negative, neutral)
+    sentiment_label = predictor.predict(text)
 
+    score_map = {
+        "positive": 2.0,
+        "neutral": 1.0,
+        "negative": 0.0
+    }
+    score = score_map.get(sentiment_label, 1.0)
 
-def save_to_db(review_id: str, sentiment: str, score: float | None):
+    return review_id, sentiment_label, score
+
+def save_to_db(review_id: str, sentiment: str, score: float):
     conn = get_db_connection()
     cur = conn.cursor()
     try:
@@ -65,7 +71,6 @@ def save_to_db(review_id: str, sentiment: str, score: float | None):
     finally:
         cur.close()
         conn.close()
-
 
 def run_consumer():
     kafka_bootstrap = os.getenv("KAFKA_BOOTSTRAP_SERVERS", "localhost:9092")
@@ -80,7 +85,7 @@ def run_consumer():
         auto_offset_reset='latest',
         enable_auto_commit=False,
         group_id=kafka_group_id,
-        consumer_timeout_ms=10000,
+        consumer_timeout_ms=15000,
         value_deserializer=lambda x: json.loads(x.decode('utf-8'))
     )
 
@@ -91,12 +96,11 @@ def run_consumer():
             review_id, sentiment, score = process_sentiment_message(message.value)
             save_to_db(review_id, sentiment, score)
             consumer.commit()
-            print(f"[OK] Processed sentiment for review_id='{review_id}' -> sentiment='{sentiment}'")
+            print(f"[OK] Processed sentiment for review_id='{review_id}' -> sentiment='{sentiment}' (score={score})")
         except Exception as exc:
-            print(f"[ERROR] Error handling Kafka message: {exc}")
+            print(f"[ERROR] Error handling Kafka message: {exc}", file=sys.stderr)
 
     print("[INFO] Consumer finished (timeout reached or no more messages).")
-
 
 if __name__ == "__main__":
     run_consumer()

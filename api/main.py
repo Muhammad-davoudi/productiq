@@ -35,17 +35,6 @@ def root():
     return {"status": "ok", "message": "Digikala AI API is running"}
 
 
-@app.post("/api/kafka_evaluation/reset")
-def reset_kafka_simulation_data():
-    try:
-        from src.database.connection import SessionLocal
-        db = SessionLocal()
-        db.execute(text("TRUNCATE TABLE kafka_sentiment_results, kafka_clustering_results RESTART IDENTITY CASCADE;"))
-        db.commit()
-        db.close()
-        return {"status": "success", "message": "Simulation and Kafka results successfully reset."}
-    except Exception as e:
-        return {"status": "error", "message": str(e)}
 
 
 # -------------------------------------------------------------

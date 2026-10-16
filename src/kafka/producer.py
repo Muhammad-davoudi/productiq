@@ -1,33 +1,56 @@
-import pandas as pd
 import json
 import time
+import pandas as pd
 from kafka import KafkaProducer
+from kafka.errors import KafkaError
 
-producer = KafkaProducer(
-    bootstrap_servers=['localhost:9092'],
-    value_serializer=lambda x: json.dumps(x).encode('utf-8')
-)
+BOOTSTRAP_SERVERS = 'localhost:9092'
+TOPIC_NAME = 'digikala-user-reviews'
 
-def stream_data():
-    reviews = pd.read_csv('input_kafka_comment.csv')
-    products = pd.read_csv('product_kafka.csv')
+def create_producer():
+    try:
+        producer = KafkaProducer(
+            bootstrap_servers=BOOTSTRAP_SERVERS,
+            value_serializer=lambda v: json.dumps(v, ensure_ascii=False).encode('utf-8')
+        )
+        print(f"[INFO] Connected to Kafka at {BOOTSTRAP_SERVERS}")
+        return producer
+    except Exception as e:
+        print(f"[ERROR] Failed to connect to Kafka: {e}")
+        return None
 
-    print("Starting stream...")
-    for i in range(len(reviews)):
-        # ارسال نقد
-        review = reviews.iloc[i].to_dict()
-        producer.send('raw_reviews', value=review)
+def main():
+    producer = create_producer()
+    if not producer:
+        return
+
+    csv_path = 'data/raw/kafka_samples_comment_100.csv'
+    try:
+        df = pd.read_csv(csv_path)
+        print(f"[INFO] Loaded {len(df)} records from {csv_path}")
+    except Exception as e:
+        print(f"[ERROR] Failed to load CSV: {e}")
+        return
+
+    print(f"[INFO] Starting to stream records to topic '{TOPIC_NAME}'...")
+    
+    for idx, row in df.iterrows():
+        message = {
+            "review_id": str(row.get('id', idx)),
+            "comment": str(row.get('text', '')),
+            "title": f"Rate: {row.get('rate', 'N/A')}"
+        }
         
-        # ارسال محصول (هر ۱۰ نقد، یک محصول - برای شبیه‌سازی)
-        if i % 10 == 0:
-            prod = products.iloc[i % len(products)].to_dict()
-            producer.send('raw_products', value=prod)
+        try:
+            producer.send(TOPIC_NAME, value=message)
+            print(f"[SENT] review_id={message['review_id']} | rate={row.get('rate')} | comment={message['comment'][:40]}...")
+            producer.flush()
+        except KafkaError as ke:
+            print(f"[ERROR] Kafka send failed: {ke}")
         
-        time.sleep(0.5)  # تاخیر برای نمایش بهتر در مصرف‌کننده‌ها
-        if i % 50 == 0: print(f"Sent {i} records...")
+        time.sleep(1.0)
 
-    producer.flush()
-    print("Stream finished.")
+    print("[INFO] Finished streaming all samples.")
 
-if __name__ == "__main__":
-    stream_data()
+if __name__ == '__main__':
+    main()

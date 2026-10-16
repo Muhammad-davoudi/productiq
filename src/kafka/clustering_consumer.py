@@ -38,7 +38,7 @@ def get_db_connection():
         user=os.getenv("DB_USER", "postgres"),
         password=os.getenv("DB_PASSWORD", ""),
         host=os.getenv("DB_HOST", "localhost"),
-        port=os.getenv("DB_PORT", 5432)
+        port=int(os.getenv("DB_PORT", 5433))
     )
 
 def safe_float(value, default: float = 0.0) -> float:
@@ -91,7 +91,6 @@ def predict_cluster(data: dict, model_instance=None) -> int:
     if not isinstance(data, dict):
         return fallback_cluster_rule(0.0, 0.0, 0.0)
 
-    # اولویت ۱: اگر شناسه کلاستر در پیام آماده بود
     if 'cluster' in data and data['cluster'] is not None:
         try:
             return int(data['cluster'])
@@ -104,7 +103,6 @@ def predict_cluster(data: dict, model_instance=None) -> int:
     if clf is None:
         clf = load_clustering_model()
 
-    # اولویت ۲: پیش‌بینی با مدل آموزش‌دیده
     if clf is not None:
         try:
             X = np.array([[price, rate, rate_cnt]])
@@ -113,7 +111,6 @@ def predict_cluster(data: dict, model_instance=None) -> int:
         except Exception as e:
             print(f"Inference error in clustering model: {e}")
 
-    # اولویت ۳: فال‌بک منطقی بر اساس تفکیک Active و دهک‌های قیمتی
     return fallback_cluster_rule(price, rate, rate_cnt)
 
 def save_to_db(product_id: str, cluster_label: int):
@@ -130,11 +127,16 @@ def save_to_db(product_id: str, cluster_label: int):
         conn.close()
 
 def run_consumer():
+    kafka_bootstrap = os.getenv("KAFKA_BOOTSTRAP_SERVERS", "localhost:9092")
+    kafka_topic = os.getenv("KAFKA_CLUSTERING_TOPIC", "digikala-product-stream")
+    kafka_group_id = os.getenv("KAFKA_CLUSTERING_GROUP_ID", "digikala-clustering-consumer")
+
     consumer = KafkaConsumer(
-        'raw_products',
-        bootstrap_servers=['localhost:9092'],
+        kafka_topic,
+        bootstrap_servers=[kafka_bootstrap],
         auto_offset_reset='latest',
         enable_auto_commit=False,
+        group_id=kafka_group_id,
         value_deserializer=lambda x: json.loads(x.decode('utf-8'))
     )
 

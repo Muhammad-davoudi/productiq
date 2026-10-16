@@ -1,8 +1,9 @@
 import os
 from dotenv import load_dotenv, find_dotenv
 from langchain_openai import ChatOpenAI
-from langchain_core.messages import HumanMessage, AIMessage, ToolMessage
+from langchain_core.messages import HumanMessage, AIMessage, ToolMessage, SystemMessage
 from src.llm import adapter
+from src.llm.session_manager import RedisConversationManager
 
 load_dotenv(find_dotenv())
 
@@ -35,6 +36,7 @@ class AssistantService:
         base_llm = ChatOpenAI(**init_kwargs)
         # اتصال همیشگی ابزارها به مدل با استفاده از bind_tools
         self.llm = base_llm.bind_tools(ALL_TOOLS)
+        self.session_manager = RedisConversationManager()
 
     def process_input(self, session_id: str, user_input: str) -> str:
         system_prompt = (
@@ -49,10 +51,25 @@ class AssistantService:
             "6. After receiving tool outputs, you MUST synthesize the results into a helpful, clear, and direct Persian response for the user without returning empty text."
         )
 
-        messages = [
-            {"role": "system", "content": system_prompt},
-            {"role": "user", "content": user_input}
-        ]
+        # دریافت سشن یا تاریخچه قبلی از ردیس
+        session_state = self.session_manager.get_state(session_id)
+        history_dicts = session_state.get("history", [])
+
+        # بازسازی پیام‌های LangChain از تاریخچه ذخیره‌شده
+        messages = [SystemMessage(content=system_prompt)]
+        for h in history_dicts:
+            role = h.get("role")
+            content = h.get("content", "")
+            if role == "user":
+                messages.append(HumanMessage(content=content))
+            elif role == "assistant":
+                messages.append(AIMessage(content=content))
+            elif role == "tool":
+                tool_call_id = h.get("tool_call_id", "call_default")
+                messages.append(ToolMessage(content=content, tool_call_id=tool_call_id))
+
+        # افزودن پیام جدید کاربر
+        messages.append(HumanMessage(content=user_input))
 
         response = self.llm.invoke(messages)
 
@@ -60,6 +77,8 @@ class AssistantService:
         if hasattr(response, "tool_calls") and response.tool_calls:
             print(f"[TOOL USAGE LOG] Model called tools: {[tc['name'] for tc in response.tool_calls]}")
             messages.append(response)
+            
+            tool_output_str = ""
             for tool_call in response.tool_calls:
                 tool_name = tool_call["name"]
                 tool_args = tool_call["args"]
@@ -67,19 +86,35 @@ class AssistantService:
 
                 if tool_func:
                     try:
-                        # استفاده از invoke برای اجرای صحیح StructuredTool در LangChain
                         tool_output = tool_func.invoke(tool_args)
                     except Exception as e:
                         tool_output = f"Error executing tool: {e}"
                 else:
                     tool_output = f"Tool {tool_name} not found."
 
-                messages.append(ToolMessage(content=str(tool_output), tool_call_id=tool_call["id"]))
+                tool_output_str = str(tool_output)
+                messages.append(ToolMessage(content=tool_output_str, tool_call_id=tool_call["id"]))
 
             final_response = self.llm.invoke(messages)
+            
+            # ذخیره تاریخچه جدید در ردیس
+            updated_history = history_dicts + [
+                {"role": "user", "content": user_input},
+                {"role": "assistant", "content": final_response.content if final_response and final_response.content else ""}
+            ]
+            self.session_manager.save_state(session_id, {"history": updated_history})
+
             if final_response and final_response.content and final_response.content.strip():
                 return final_response.content
-            return f"نتایج یافت شده: {str(tool_output)}"
+            return f"نتایج یافت شده: {tool_output_str}"
+
+        # ذخیره تاریخچه عادی در ردیس
+        assistant_content = response.content if response and response.content else "پاسخی دریافت نشد."
+        updated_history = history_dicts + [
+            {"role": "user", "content": user_input},
+            {"role": "assistant", "content": assistant_content}
+        ]
+        self.session_manager.save_state(session_id, {"history": updated_history})
 
         if response and response.content and response.content.strip():
             return response.content
