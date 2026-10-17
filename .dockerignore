@@ -1,0 +1,46 @@
+# Virtual Environment & Python cache
+venv/
+env/
+__pycache__/
+*.pyc
+*.pyo
+*.pyd
+.Python
+
+# Git
+.git/
+.gitignore
+
+# Data & Datasets
+data/
+*.csv
+*.parquet
+*.db
+*.sqlite
+
+# ML Models (BERT, FastText, and heavy weights)
+models/
+model/
+checkpoints/
+embeddings/
+mlruns/
+.cache/
+
+# Heavy model file extensions (anywhere in project)
+*.bin
+*.safetensors
+*.pt
+*.pth
+*.onnx
+*.ckpt
+*.ft
+*.vec
+*.h5
+*.pickle
+*.npy
+
+# Note: .joblib and selected lightweight simulation assets are kept/managed via volume or allowed if needed, while heavy LLM/BERT weights are strictly ignored.
+
+# Docs & Environment
+*.md
+.env

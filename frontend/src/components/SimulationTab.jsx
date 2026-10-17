@@ -99,7 +99,7 @@ export default function SimulationTab() {
     setData(null);
     setStatus("idle");
     try {
-      const res = await axios.post("/api/kafka_evaluation/start");
+      const res = await axios.post("http://localhost:8000/api/kafka_evaluation/start");
       setEvalId(res.data.eval_id);
       setStatus("running");
       localStorage.setItem("kafka_eval_id", res.data.eval_id.toString());
@@ -116,7 +116,7 @@ export default function SimulationTab() {
     setLoading(true);
     try {
       if (evalId) {
-        await axios.post(`/api/kafka_evaluation/stop/${evalId}`);
+        await axios.post(`http://localhost:8000/api/kafka_evaluation/stop/${evalId}`);
       }
     } catch (err) {
       console.error("Error stopping simulation:", err);
@@ -191,41 +191,74 @@ export default function SimulationTab() {
           </button>
 
           <button
-            onClick={async () => {
-              if (!window.confirm("آیا مطمئن هستید که می‌خواهید تمام نتایج شبیه‌سازی و داده‌های کافکا را پاک کنید؟")) {
-                return;
-              }
+            type="button"
+            onClick={async (e) => {
+              e.preventDefault();
+              console.log("RESET 1 CLICKED");
               setLoading(true);
               try {
-                // اگر در حال اجرا است، اول stop
                 if (evalId) {
                   try {
-                    await axios.post(`/api/kafka_evaluation/stop/${evalId}`);
+                    await axios.post(`http://localhost:8000/api/kafka_evaluation/stop/${evalId}`);
                   } catch (e) {
                     console.warn("stop before reset:", e);
                   }
                 }
-                try {
-                  await axios.post("/api/kafka_evaluation/reset");
-                } catch (e) {
-                  console.warn("reset api:", e);
-                }
+                await axios.post("http://localhost:8000/api/kafka_evaluation/reset");
+              } catch (err) {
+                console.error("reset error:", err);
               } finally {
-                // قطع polling
                 if (pollTimerRef.current) {
                   clearInterval(pollTimerRef.current);
                   pollTimerRef.current = null;
                 }
-                // خالی کردن UI
                 setData(null);
                 setEvalId(null);
                 setStatus("idle");
                 localStorage.removeItem("kafka_eval_id");
                 setLoading(false);
-                alert("شبیه‌سازی متوقف و داده‌ها پاک شدند.");
+                console.log("Reset completed successfully");
               }
             }}
-            className="px-4 py-2 bg-red-600 hover:bg-red-700 text-white font-medium rounded-lg shadow transition flex items-center gap-2"
+            className="px-4 py-2 bg-red-600 hover:bg-red-700 text-white font-medium rounded-lg shadow transition flex items-center gap-2 cursor-pointer"
+          >
+            <svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+              <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M19 7l-.867 12.142A2 2 0 0116.138 21H7.862a2 2 0 01-1.995-1.858L5 7m5 4v6m4-6v6m1-10V4a1 1 0 00-1-1h-4a1 1 0 00-1 1v3M4 7h16" />
+            </svg>
+            Reset Simulation
+          </button>
+
+          <button
+            type="button"
+            onClick={async (e) => {
+              e.preventDefault();
+              console.log("RESET 2 CLICKED");
+              setLoading(true);
+              try {
+                if (evalId) {
+                  try {
+                    await axios.post(`http://localhost:8000/api/kafka_evaluation/stop/${evalId}`);
+                  } catch (e) {
+                    console.warn("stop before reset:", e);
+                  }
+                }
+                await axios.post("http://localhost:8000/api/kafka_evaluation/reset");
+              } catch (err) {
+                console.error("reset error:", err);
+              } finally {
+                if (pollTimerRef.current) {
+                  clearInterval(pollTimerRef.current);
+                  pollTimerRef.current = null;
+                }
+                setData(null);
+                setEvalId(null);
+                setStatus("idle");
+                localStorage.removeItem("kafka_eval_id");
+                setLoading(false);
+                console.log("Reset completed successfully");
+              }
+            }}
+            className="px-4 py-2 bg-red-600 hover:bg-red-700 text-white font-medium rounded-lg shadow transition flex items-center gap-2 cursor-pointer"
           >
             <svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
               <path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M19 7l-.867 12.142A2 2 0 0116.138 21H7.862a2 2 0 01-1.995-1.858L5 7m5 4v6m4-6v6m1-10V4a1 1 0 00-1-1h-4a1 1 0 00-1 1v3M4 7h16" />
