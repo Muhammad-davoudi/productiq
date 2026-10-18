@@ -6,15 +6,14 @@ services:
       ZOOKEEPER_CLIENT_PORT: 2181
       ZOOKEEPER_TICK_TIME: 2000
     networks:
-      - digikala_net
-
+    - digikala_net
   kafka:
     image: docker.arvancloud.ir/confluentinc/cp-kafka:7.5.0
     container_name: digikala_kafka
     depends_on:
-      - zookeeper
+    - zookeeper
     ports:
-      - "9093:9092"
+    - 9093:9092
     environment:
       KAFKA_BROKER_ID: 1
       KAFKA_ZOOKEEPER_CONNECT: zookeeper:2181
@@ -23,14 +22,15 @@ services:
       KAFKA_INTERBROKER_LISTENER_NAME: PLAINTEXT
       KAFKA_OFFSETS_TOPIC_REPLICATION_FACTOR: 1
     networks:
-      - digikala_net
+    - digikala_net
     healthcheck:
-      test: ["CMD-SHELL", "kafka-broker-api-versions --bootstrap-server localhost:9092 || exit 1"]
+      test:
+      - CMD-SHELL
+      - kafka-broker-api-versions --bootstrap-server localhost:9092 || exit 1
       interval: 10s
       timeout: 5s
       retries: 5
       start_period: 20s
-
   db:
     image: docker.arvancloud.ir/library/postgres:15-alpine
     container_name: digikala_db
@@ -39,32 +39,35 @@ services:
       POSTGRES_USER: postgres
       POSTGRES_PASSWORD: postgrespassword
     volumes:
-      - postgres_data:/var/lib/postgresql/data
+    - postgres_data:/var/lib/postgresql/data
     networks:
-      - digikala_net
+    - digikala_net
     healthcheck:
-      test: ["CMD-SHELL", "pg_isready -U postgres"]
+      test:
+      - CMD-SHELL
+      - pg_isready -U postgres
       interval: 5s
       timeout: 5s
       retries: 5
-
   redis:
     image: docker.arvancloud.ir/library/redis:alpine
     container_name: digikala_redis
     networks:
-      - digikala_net
+    - digikala_net
     healthcheck:
-      test: ["CMD", "redis-cli", "ping"]
+      test:
+      - CMD
+      - redis-cli
+      - ping
       interval: 5s
       timeout: 5s
       retries: 5
-
   backend:
     build:
       context: .
       dockerfile: docker/Dockerfile.backend
     container_name: digikala_backend
-    command: /usr/local/bin/uvicorn api.main:app --host 0.0.0.0 --port 8000
+    command: python -m uvicorn api.main:app --host 0.0.0.0 --port 8000
     restart: unless-stopped
     depends_on:
       db:
@@ -74,29 +77,28 @@ services:
       kafka:
         condition: service_healthy
     environment:
-      - MLFLOW_ALLOW_FILE_STORE=true
-      - PYTHONPATH=/app:/app/.venv/lib/python3.12/site-packages
-      - DB_HOST=db
-      - DB_PORT=5432
-      - DB_NAME=digikala_db
-      - DB_USER=postgres
-      - DB_PASSWORD=postgrespassword
-      - REDIS_HOST=redis
-      - REDIS_PORT=6379
-      - KAFKA_BOOTSTRAP_SERVERS=kafka:9092
-      - KAFKA_TOPIC=digikala-user-reviews
-      - OPENAI_API_KEY=aa-itM8CdJwlbsF3eNrnbguBIEP6Lln9sJXOlJ4pwdWtcJmQTOL
-      - LLM_API_KEY=aa-itM8CdJwlbsF3eNrnbguBIEP6Lln9sJXOlJ4pwdWtcJmQTOL
-      - LLM_BASE_URL=https://api.avalai.ir/v1
-      - LLM_MODEL=gpt-4o-mini
+    - MLFLOW_ALLOW_FILE_STORE=true
+    - PYTHONPATH=/app:/app/.venv/lib/python3.12/site-packages
+    - DB_HOST=db
+    - DB_PORT=5432
+    - DB_NAME=digikala_db
+    - DB_USER=postgres
+    - DB_PASSWORD=postgrespassword
+    - REDIS_HOST=redis
+    - REDIS_PORT=6379
+    - KAFKA_BOOTSTRAP_SERVERS=kafka:9092
+    - KAFKA_TOPIC=digikala-user-reviews
+    - OPENAI_API_KEY=aa-itM8CdJwlbsF3eNrnbguBIEP6Lln9sJXOlJ4pwdWtcJmQTOL
+    - LLM_API_KEY=aa-itM8CdJwlbsF3eNrnbguBIEP6Lln9sJXOlJ4pwdWtcJmQTOL
+    - LLM_BASE_URL=https://api.avalai.ir/v1
+    - LLM_MODEL=gpt-4o-mini
     volumes:
-      - ./mlruns:/app/mlruns
-      - ./data:/app/data
+    - ./mlruns:/app/mlruns
+    - ./data:/app/data
     ports:
-      - "8000:8000"
+    - 8000:8000
     networks:
-      - digikala_net
-
+    - digikala_net
   frontend:
     build:
       context: .
@@ -104,15 +106,13 @@ services:
     container_name: digikala_frontend
     restart: unless-stopped
     depends_on:
-      - backend
+    - backend
     ports:
-      - "80:80"
+    - 80:80
     networks:
-      - digikala_net
-
+    - digikala_net
 volumes:
-  postgres_data:
-
+  postgres_data: null
 networks:
   digikala_net:
     driver: bridge
