@@ -64,6 +64,7 @@ services:
       context: .
       dockerfile: docker/Dockerfile.backend
     container_name: digikala_backend
+    command: /usr/local/bin/uvicorn api.main:app --host 0.0.0.0 --port 8000
     restart: unless-stopped
     depends_on:
       db:
@@ -73,6 +74,8 @@ services:
       kafka:
         condition: service_healthy
     environment:
+      - MLFLOW_ALLOW_FILE_STORE=true
+      - PYTHONPATH=/app:/app/.venv/lib/python3.12/site-packages
       - DB_HOST=db
       - DB_PORT=5432
       - DB_NAME=digikala_db
