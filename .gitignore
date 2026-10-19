@@ -39,3 +39,4 @@ models/
 *.zip
 *.npy
 *.npz
+backup/
