@@ -109,10 +109,14 @@ def load_product_clusters(clusters_df_or_path="data/processed/product_clusters.c
         session.query(ProductCluster).delete()
         session.commit()
 
-        records = [
-            {"product_id": int(r["product_id"]), "cluster_id": int(r["cluster_id"])}
-            for _, r in df[["product_id", "cluster_id"]].iterrows()
-        ]
+        if "cluster_id" not in df.columns and "cluster" in df.columns:
+            df = df.rename(columns={"cluster": "cluster_id"})
+
+        records = (
+            df[["product_id", "cluster_id"]]
+            .astype({"product_id": int, "cluster_id": int})
+            .to_dict(orient="records")
+        )
 
         # Insert in chunks to avoid memory spikes
         for i in range(0, len(records), BATCH_SIZE):

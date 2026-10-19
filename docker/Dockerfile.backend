@@ -9,10 +9,16 @@ COPY docker/packages/libgomp1_12.2.0-14+deb12u1_amd64.deb /tmp/libgomp1.deb
 # Install system dependencies offline
 RUN dpkg -i /tmp/gcc-12-base.deb /tmp/libgomp1.deb && rm -f /tmp/*.deb
 
+# Copy requirements first for caching
+COPY requirements.txt /app/
+
+# Install Python dependencies
+RUN pip install --no-cache-dir -r requirements.txt
+
 # Copy project files (respecting .dockerignore)
 COPY . /app
 
-# Set PYTHONPATH to use the host/pre-installed .venv site-packages inside container
+# Set PYTHONPATH
 ENV PYTHONPATH=/app
 
 EXPOSE 8000

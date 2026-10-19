@@ -1,5 +1,4 @@
 .env
-A.txt
 
 # Python
 .venv/
@@ -32,7 +31,7 @@ models/
 !models/
 !models/baseline_sentiment.joblib
 !models/online_cluster_classifier.joblib
-!models/sentiment_model.pkl
+!models/sentiment_model.joblib
 
 # Extra heavy binaries / vectors / archives / arrays
 *.bin
