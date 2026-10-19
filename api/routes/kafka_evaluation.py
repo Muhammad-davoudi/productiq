@@ -1,74 +1,167 @@
 import os
+import threading
 import subprocess
+import sys
 import psycopg2
-from psycopg2.extras import RealDictCursor
-from fastapi import APIRouter, HTTPException
+from fastapi import APIRouter
+from pydantic import BaseModel
+from typing import Optional
 
-router = APIRouter(prefix="/api/kafka_evaluation", tags=["kafka_evaluation"])
+router = APIRouter(prefix="/api/kafka_evaluation", tags=["Kafka Evaluation"])
 
-DB_URL = os.getenv("DATABASE_URL", "postgresql://postgres:postgrespassword@db:5432/digikala_db")
-TARGET_SCRIPTS = ["stream_producer.py", "sentiment_consumer.py", "clustering_consumer.py"]
+state = {
+    "active": False,
+    "eval_id": None,
+    "status": "stopped",
+    "threads": []
+}
+
+
+class StartReq(BaseModel):
+    speed: Optional[float] = 1.0
+    mode: Optional[str] = "standard"
+
+
+def run_script(script_path):
+    try:
+        python_exe = sys.executable
+        subprocess.run([python_exe, script_path], check=False)
+    except Exception as e:
+        print(f"[ERROR] Failed to run {script_path}: {e}")
+
 
 def get_db_connection():
-    return psycopg2.connect(DB_URL, cursor_factory=RealDictCursor)
+    db_url = os.getenv("DATABASE_URL")
+    if db_url:
+        return psycopg2.connect(db_url)
+    return psycopg2.connect(
+        dbname=os.getenv("DB_NAME", "digikala_db"),
+        user=os.getenv("DB_USER", "postgres"),
+        password=os.getenv("DB_PASSWORD", "postgrespassword"),
+        host=os.getenv("DB_HOST", "db"),
+        port=int(os.getenv("DB_PORT", 5432))
+    )
 
-def kill_kafka_processes():
-    import psutil
-    for proc in psutil.process_iter(['pid', 'name', 'cmdline']):
-        try:
-            cmdline = proc.info.get('cmdline') or []
-            if any(any(script in arg for script in TARGET_SCRIPTS) for arg in cmdline):
-                proc.kill()
-        except (psutil.NoSuchProcess, psutil.AccessDenied, psutil.ZombieProcess):
-            pass
 
 @router.post("/start")
-def start_kafka_simulation():
-    try:
-        kill_kafka_processes()
-        
-        # Run in background detached from uvicorn process group
-        subprocess.Popen(["nohup", "python", "/app/src/kafka/sentiment_consumer.py"], stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL, preexec_fn=os.setsid)
-        subprocess.Popen(["nohup", "python", "/app/src/kafka/clustering_consumer.py"], stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL, preexec_fn=os.setsid)
-        subprocess.Popen(["nohup", "python", "/app/src/kafka/stream_producer.py"], stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL, preexec_fn=os.setsid)
+def start_eval(req: StartReq = None):
+    if state["active"]:
+        return {"eval_id": state["eval_id"], "status": "running", "message": "Already running"}
 
-        conn = get_db_connection()
-        cur = conn.cursor()
-        cur.execute("INSERT INTO kafka_evaluation_runs (status) VALUES ('RUNNING') RETURNING id;")
-        run_id = cur.fetchone()["id"]
-        conn.commit()
-        cur.close()
-        conn.close()
+    state["active"] = True
+    state["eval_id"] = 1
+    state["status"] = "running"
 
-        return {"status": "success", "eval_id": str(run_id), "message": "Simulation started successfully"}
-    except Exception as e:
-        raise HTTPException(status_code=500, detail=str(e))
+    threads = [
+        threading.Thread(target=run_script, args=("src/kafka/sentiment_consumer.py",), daemon=True),
+        threading.Thread(target=run_script, args=("src/kafka/clustering_consumer.py",), daemon=True),
+        threading.Thread(target=run_script, args=("src/kafka/stream_producer.py",), daemon=True)
+    ]
+
+    state["threads"] = threads
+    for t in threads:
+        t.start()
+
+    return {"eval_id": 1, "status": "running"}
+
 
 @router.post("/reset")
-def reset_kafka_simulation():
+def reset_eval():
+    state["active"] = False
+    state["eval_id"] = None
+    state["status"] = "stopped"
+    state["threads"] = []
+    
     try:
-        kill_kafka_processes()
         conn = get_db_connection()
         cur = conn.cursor()
-        cur.execute("UPDATE kafka_evaluation_runs SET status = 'STOPPED' WHERE status = 'RUNNING';")
+        cur.execute("TRUNCATE TABLE kafka_sentiment_results, kafka_clustering_results, kafka_evaluation_runs RESTART IDENTITY CASCADE;")
         conn.commit()
         cur.close()
         conn.close()
-        return {"status": "success", "message": "Simulation reset successfully"}
     except Exception as e:
-        raise HTTPException(status_code=500, detail=str(e))
+        print(f"[WARN] Could not truncate Kafka simulation tables in DB: {e}")
+
+    return {"status": "success"}
+
 
 @router.get("/active")
-def get_active_simulation():
+def get_active():
+    return {
+        "active": state["active"],
+        "eval_id": state["eval_id"],
+        "status": "running" if state["active"] else "stopped"
+    }
+
+
+@router.get("/status/{eval_id}")
+def get_status(eval_id: int):
+    sentiment_counts = {"positive": 0, "neutral": 0, "negative": 0}
+    cluster_counts = {0: 0, 1: 0, 2: 0, 3: 0, 4: 0, 5: 0}
+
     try:
         conn = get_db_connection()
         cur = conn.cursor()
-        cur.execute("SELECT id, status, created_at FROM kafka_evaluation_runs ORDER BY id DESC LIMIT 1;")
-        row = cur.fetchone()
+
+        cur.execute("SELECT sentiment, count(*) FROM kafka_sentiment_results GROUP BY sentiment;")
+        for row in cur.fetchall():
+            sent, cnt = row
+            sent_key = str(sent).lower()
+            if sent_key in sentiment_counts:
+                sentiment_counts[sent_key] = cnt
+
+        cur.execute("SELECT cluster_label, count(*) FROM kafka_clustering_results GROUP BY cluster_label;")
+        for row in cur.fetchall():
+            lbl, cnt = row
+            try:
+                if isinstance(lbl, str) and "_" in lbl:
+                    c_idx = int(lbl.split("_")[-1])
+                else:
+                    c_idx = int(lbl)
+                if c_idx in cluster_counts:
+                    cluster_counts[c_idx] = cnt
+            except Exception:
+                pass
+
         cur.close()
         conn.close()
-        if row:
-            return {"active": row["status"] == "RUNNING", "eval_id": str(row["id"])}
-        return {"active": False, "eval_id": None}
     except Exception as e:
-        return {"active": False, "eval_id": None}
+        print(f"[WARN] Could not fetch real metrics from DB: {e}")
+
+    sentiment_distribution = [
+        {"sentiment": "positive", "count": sentiment_counts["positive"]},
+        {"sentiment": "neutral", "count": sentiment_counts["neutral"]},
+        {"sentiment": "negative", "count": sentiment_counts["negative"]},
+    ]
+
+    clustering_distribution = [
+        {"cluster": 0, "count": cluster_counts[0]},
+        {"cluster": 1, "count": cluster_counts[1]},
+        {"cluster": 2, "count": cluster_counts[2]},
+        {"cluster": 3, "count": cluster_counts[3]},
+        {"cluster": 4, "count": cluster_counts[4]},
+        {"cluster": 5, "count": cluster_counts[5]},
+    ]
+
+    sentiment_messages = sum(sentiment_counts.values())
+    clustering_messages = sum(cluster_counts.values())
+
+    return {
+        "eval_id": eval_id,
+        "status": "running" if state["active"] else "stopped",
+        "sentiment_distribution": sentiment_distribution,
+        "clustering_distribution": clustering_distribution,
+        "sentiment_stats": {
+            "messages": sentiment_messages
+        },
+        "clustering_stats": {
+            "messages": clustering_messages
+        }
+    }
+
+
+@router.post("/stop/{eval_id}")
+def stop_eval(eval_id: int):
+    state["active"] = False
+    state["status"] = "stopped"
+    return {"status": "success", "eval_id": eval_id}
